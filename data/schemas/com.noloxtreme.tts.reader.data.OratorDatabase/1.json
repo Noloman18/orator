@@ -1,0 +1,332 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "fce6599e5f09cb31c3a1ebda801e78b1",
+    "entities": [
+      {
+        "tableName": "documents",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, `originalFileName` TEXT NOT NULL, `mimeType` TEXT NOT NULL, `sourceExtension` TEXT NOT NULL, `privateSourcePath` TEXT NOT NULL, `sha256` TEXT NOT NULL, `languageTag` TEXT, `totalCharacterCount` INTEGER NOT NULL, `sectionCount` INTEGER NOT NULL, `importedAt` INTEGER NOT NULL, `lastOpenedAt` INTEGER, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "originalFileName",
+            "columnName": "originalFileName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mimeType",
+            "columnName": "mimeType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceExtension",
+            "columnName": "sourceExtension",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "privateSourcePath",
+            "columnName": "privateSourcePath",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sha256",
+            "columnName": "sha256",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "languageTag",
+            "columnName": "languageTag",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "totalCharacterCount",
+            "columnName": "totalCharacterCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sectionCount",
+            "columnName": "sectionCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "importedAt",
+            "columnName": "importedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastOpenedAt",
+            "columnName": "lastOpenedAt",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_documents_sha256",
+            "unique": true,
+            "columnNames": [
+              "sha256"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_documents_sha256` ON `${TABLE_NAME}` (`sha256`)"
+          }
+        ]
+      },
+      {
+        "tableName": "sections",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`documentId` TEXT NOT NULL, `sectionIndex` INTEGER NOT NULL, `title` TEXT, `firstParagraphIndex` INTEGER NOT NULL, `lastParagraphIndex` INTEGER NOT NULL, `absoluteStart` INTEGER NOT NULL, `absoluteEnd` INTEGER NOT NULL, PRIMARY KEY(`documentId`, `sectionIndex`), FOREIGN KEY(`documentId`) REFERENCES `documents`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "documentId",
+            "columnName": "documentId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sectionIndex",
+            "columnName": "sectionIndex",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "firstParagraphIndex",
+            "columnName": "firstParagraphIndex",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastParagraphIndex",
+            "columnName": "lastParagraphIndex",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "absoluteStart",
+            "columnName": "absoluteStart",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "absoluteEnd",
+            "columnName": "absoluteEnd",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "documentId",
+            "sectionIndex"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_sections_documentId_sectionIndex",
+            "unique": false,
+            "columnNames": [
+              "documentId",
+              "sectionIndex"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sections_documentId_sectionIndex` ON `${TABLE_NAME}` (`documentId`, `sectionIndex`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "documents",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "documentId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "paragraphs",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`documentId` TEXT NOT NULL, `paragraphIndex` INTEGER NOT NULL, `sectionIndex` INTEGER NOT NULL, `text` TEXT NOT NULL, `absoluteStart` INTEGER NOT NULL, `absoluteEnd` INTEGER NOT NULL, PRIMARY KEY(`documentId`, `paragraphIndex`), FOREIGN KEY(`documentId`) REFERENCES `documents`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "documentId",
+            "columnName": "documentId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "paragraphIndex",
+            "columnName": "paragraphIndex",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sectionIndex",
+            "columnName": "sectionIndex",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "text",
+            "columnName": "text",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "absoluteStart",
+            "columnName": "absoluteStart",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "absoluteEnd",
+            "columnName": "absoluteEnd",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "documentId",
+            "paragraphIndex"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_paragraphs_documentId_sectionIndex_paragraphIndex",
+            "unique": false,
+            "columnNames": [
+              "documentId",
+              "sectionIndex",
+              "paragraphIndex"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_paragraphs_documentId_sectionIndex_paragraphIndex` ON `${TABLE_NAME}` (`documentId`, `sectionIndex`, `paragraphIndex`)"
+          },
+          {
+            "name": "index_paragraphs_documentId_absoluteStart_absoluteEnd",
+            "unique": false,
+            "columnNames": [
+              "documentId",
+              "absoluteStart",
+              "absoluteEnd"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_paragraphs_documentId_absoluteStart_absoluteEnd` ON `${TABLE_NAME}` (`documentId`, `absoluteStart`, `absoluteEnd`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "documents",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "documentId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "reading_progress",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`documentId` TEXT NOT NULL, `paragraphIndex` INTEGER NOT NULL, `offsetInParagraph` INTEGER NOT NULL, `absoluteOffset` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `completed` INTEGER NOT NULL, PRIMARY KEY(`documentId`), FOREIGN KEY(`documentId`) REFERENCES `documents`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "documentId",
+            "columnName": "documentId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "paragraphIndex",
+            "columnName": "paragraphIndex",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "offsetInParagraph",
+            "columnName": "offsetInParagraph",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "absoluteOffset",
+            "columnName": "absoluteOffset",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isCompleted",
+            "columnName": "completed",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "documentId"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "documents",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "documentId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'fce6599e5f09cb31c3a1ebda801e78b1')"
+    ]
+  }
+}

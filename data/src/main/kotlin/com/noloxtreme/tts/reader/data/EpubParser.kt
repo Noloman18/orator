@@ -1,0 +1,214 @@
+package com.noloxtreme.tts.reader.data
+
+import java.io.File
+import java.io.IOException
+import java.net.URLDecoder
+import java.nio.charset.StandardCharsets
+import java.util.Locale
+import java.util.zip.ZipFile
+import com.noloxtreme.tts.reader.domain.ImportError
+import org.jsoup.Jsoup
+import org.w3c.dom.Element
+import javax.xml.parsers.DocumentBuilderFactory
+
+private const val MAX_EPUB_ENTRIES = 10_000
+private const val MAX_EPUB_ENTRY_BYTES = 25L * 1024L * 1024L
+private const val MAX_EPUB_TOTAL_BYTES = 250L * 1024L * 1024L
+
+internal class EpubParser : BookParser {
+    override fun readMetadata(file: File, displayName: String): ParsedMetadata =
+        openBook(file, displayName).use { it.metadata }
+
+    override suspend fun forEachParagraph(
+        file: File,
+        consumer: suspend (String) -> Unit
+    ) {
+        openBook(file, file.name).use { book ->
+            var totalRead = 0L
+            for (item in book.spine) {
+                val entry = book.zip.getEntry(item.href)
+                    ?: throw ImportException(ImportError.MALFORMED_DOCUMENT)
+                val bytes = readEntry(book.zip, entry)
+                totalRead += bytes.size
+                if (totalRead > MAX_EPUB_TOTAL_BYTES) {
+                    throw ImportException(ImportError.EPUB_LIMIT_EXCEEDED)
+                }
+                val document = Jsoup.parse(
+                    String(bytes, StandardCharsets.UTF_8),
+                    item.href
+                )
+                document.select("script,style,nav,form,svg,img,audio,video,iframe").remove()
+                val blocks = document.select("h1,h2,h3,h4,h5,h6,p,li,blockquote,pre")
+                    .map { it.text().trim() }
+                    .filter { it.isNotBlank() }
+                if (blocks.isEmpty()) {
+                    val bodyText = document.body()?.text()?.trim()
+                    if (!bodyText.isNullOrBlank()) consumer(bodyText)
+                } else {
+                    for (block in blocks) consumer(block)
+                }
+            }
+        }
+    }
+
+    companion object {
+        fun isEpub(file: File): Boolean = try {
+            ZipFile(file).use { zip ->
+                val mimetype = zip.getEntry("mimetype") ?: return false
+                String(readEntry(zip, mimetype), StandardCharsets.US_ASCII)
+                    .trim() == "application/epub+zip"
+            }
+        } catch (_: Throwable) {
+            false
+        }
+    }
+}
+
+private class ParsedEpub(
+    val zip: ZipFile,
+    val metadata: ParsedMetadata,
+    val spine: List<SpineItem>
+) : AutoCloseable {
+    override fun close() = zip.close()
+}
+
+private data class SpineItem(
+    val href: String,
+    val mediaType: String
+)
+
+private fun openBook(file: File, displayName: String): ParsedEpub {
+    val zip = try {
+        ZipFile(file)
+    } catch (_: Throwable) {
+        throw ImportException(ImportError.MALFORMED_DOCUMENT)
+    }
+    try {
+        if (zip.size() > MAX_EPUB_ENTRIES) {
+            throw ImportException(ImportError.EPUB_LIMIT_EXCEEDED)
+        }
+        val mimetype = zip.getEntry("mimetype")
+            ?: throw ImportException(ImportError.MALFORMED_DOCUMENT)
+        if (String(readEntry(zip, mimetype), StandardCharsets.US_ASCII).trim() != "application/epub+zip") {
+            throw ImportException(ImportError.MALFORMED_DOCUMENT)
+        }
+        if (zip.getEntry("META-INF/encryption.xml") != null) {
+            throw ImportException(ImportError.EPUB_ENCRYPTED)
+        }
+        val container = parseXml(
+            readEntry(
+                zip,
+                zip.getEntry("META-INF/container.xml")
+                    ?: throw ImportException(ImportError.MALFORMED_DOCUMENT)
+            )
+        )
+        val rootFile = container.getElementsByTagNameNS("*", "rootfile")
+            .item(0) as? Element
+            ?: throw ImportException(ImportError.MALFORMED_DOCUMENT)
+        val opfPath = safeZipPath("", rootFile.getAttribute("full-path"))
+        val opf = parseXml(
+            readEntry(
+                zip,
+                zip.getEntry(opfPath) ?: throw ImportException(ImportError.MALFORMED_DOCUMENT)
+            )
+        )
+        val basePath = opfPath.substringBeforeLast('/', "")
+        val manifest = linkedMapOf<String, SpineItem>()
+        val items = opf.getElementsByTagNameNS("*", "item")
+        for (index in 0 until items.length) {
+            val item = items.item(index) as Element
+            val id = item.getAttribute("id")
+            val href = safeZipPath(basePath, item.getAttribute("href"))
+            val mediaType = item.getAttribute("media-type")
+            if (id.isNotBlank()) manifest[id] = SpineItem(href, mediaType)
+        }
+        val spineElement = opf.getElementsByTagNameNS("*", "spine")
+            .item(0) as? Element
+            ?: throw ImportException(ImportError.MALFORMED_DOCUMENT)
+        val spine = buildList {
+            val refs = spineElement.getElementsByTagNameNS("*", "itemref")
+            for (index in 0 until refs.length) {
+                val idref = (refs.item(index) as Element).getAttribute("idref")
+                manifest[idref]?.let { add(it) }
+            }
+        }.filter {
+            it.mediaType == "application/xhtml+xml" || it.mediaType == "text/html"
+        }
+        if (spine.isEmpty()) throw ImportException(ImportError.NO_READABLE_TEXT)
+        val title = opf.getElementsByTagNameNS("*", "title").item(0)
+            ?.textContent?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: displayName.substringBeforeLast('.', displayName)
+                .trim()
+                .ifBlank { "Untitled book" }
+        val language = opf.getElementsByTagNameNS("*", "language").item(0)
+            ?.textContent?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { Locale.forLanguageTag(it).toLanguageTag() }
+            ?.takeIf { it != Locale.ROOT.toLanguageTag() }
+        return ParsedEpub(
+            zip = zip,
+            metadata = ParsedMetadata(title.take(200), "application/epub+zip", language),
+            spine = spine
+        )
+    } catch (error: Throwable) {
+        zip.close()
+        if (error is ImportException) throw error
+        throw ImportException(ImportError.MALFORMED_DOCUMENT)
+    }
+}
+
+private fun readEntry(zip: ZipFile, entry: java.util.zip.ZipEntry): ByteArray {
+    if (entry.isDirectory || entry.size > MAX_EPUB_ENTRY_BYTES) {
+        throw ImportException(ImportError.EPUB_LIMIT_EXCEEDED)
+    }
+    val output = java.io.ByteArrayOutputStream()
+    zip.getInputStream(entry).use { input ->
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        var total = 0L
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            total += read
+            if (total > MAX_EPUB_ENTRY_BYTES) {
+                throw ImportException(ImportError.EPUB_LIMIT_EXCEEDED)
+            }
+            output.write(buffer, 0, read)
+        }
+    }
+    return output.toByteArray()
+}
+
+private fun parseXml(bytes: ByteArray): org.w3c.dom.Document =
+    try {
+        DocumentBuilderFactory.newInstance().apply {
+            isNamespaceAware = true
+            setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+            setFeature("http://xml.org/sax/features/external-general-entities", false)
+            setFeature("http://xml.org/sax/features/external-parameter-entities", false)
+            setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
+            isXIncludeAware = false
+            isExpandEntityReferences = false
+        }.newDocumentBuilder().parse(bytes.inputStream())
+    } catch (_: Throwable) {
+        throw ImportException(ImportError.MALFORMED_DOCUMENT)
+    }
+
+private fun safeZipPath(base: String, href: String): String {
+    val decoded = URLDecoder.decode(href.substringBefore('#'), "UTF-8")
+        .replace(Char(92), '/')
+    val components = (if (base.isBlank()) decoded else "$base/$decoded")
+        .split('/')
+    val result = ArrayDeque<String>()
+    for (component in components) {
+        when {
+            component.isBlank() || component == "." -> Unit
+            component == ".." -> {
+                if (result.isEmpty()) throw ImportException(ImportError.MALFORMED_DOCUMENT)
+                result.removeLast()
+            }
+            else -> result.addLast(component)
+        }
+    }
+    return result.joinToString("/")
+}

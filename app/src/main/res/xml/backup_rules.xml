@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Imported books, database rows, settings, and progress remain device-local. -->
+    <exclude domain="root" path="." />
+</full-backup-content>
