@@ -1,8 +1,31 @@
+import org.gradle.api.GradleException
+import java.io.File
+import java.util.Base64
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
+}
+
+val keystoreEnv = providers.environmentVariable("ANDROID_BUILD_KEYSTORE")
+val keystoreAliasEnv = providers.environmentVariable("ANDROID_BUILD_KEYSTORE_ALIAS")
+val keystorePasswordEnv = providers.environmentVariable("ANDROID_BUILD_KEYSTORE_PASSWORD")
+val keystoreConfigured = keystoreEnv.isPresent && keystoreAliasEnv.isPresent && keystorePasswordEnv.isPresent
+
+fun resolveKeystoreFile(raw: String): File {
+    val asPath = File(raw)
+    if (asPath.isFile) return asPath
+    val decoded = try {
+        Base64.getDecoder().decode(raw.trim())
+    } catch (e: IllegalArgumentException) {
+        throw GradleException("ANDROID_BUILD_KEYSTORE is neither an existing file nor valid base64 content", e)
+    }
+    return layout.buildDirectory.file("keystores/upload-keystore.jks").get().asFile.also { out ->
+        out.parentFile.mkdirs()
+        out.writeBytes(decoded)
+    }
 }
 
 android {
@@ -25,6 +48,14 @@ android {
         release {
             optimization {
                 enable = false
+            }
+            if (keystoreConfigured) {
+                signingConfig = signingConfigs.create("release").apply {
+                    storeFile = resolveKeystoreFile(keystoreEnv.get())
+                    storePassword = keystorePasswordEnv.get()
+                    keyAlias = keystoreAliasEnv.get()
+                    keyPassword = keystorePasswordEnv.get()
+                }
             }
         }
     }
@@ -66,4 +97,29 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
+}
+
+tasks.register("buildSignedBundle") {
+    group = "release"
+    description = "Builds a signed release bundle and copies it to app/release/app-release.aab"
+    if (keystoreConfigured) {
+        dependsOn(tasks.named("bundleRelease"))
+        doLast {
+            val bundle = layout.buildDirectory.file("outputs/bundle/release/app-release.aab").get().asFile
+            val target = project.file("release/app-release.aab")
+            copy {
+                from(bundle)
+                into(target.parentFile)
+                rename(bundle.name, target.name)
+            }
+            logger.lifecycle("Signed bundle copied to {}", target)
+        }
+    } else {
+        doLast {
+            throw GradleException(
+                "ANDROID_BUILD_KEYSTORE, ANDROID_BUILD_KEYSTORE_ALIAS and ANDROID_BUILD_KEYSTORE_PASSWORD " +
+                    "environment variables must be set"
+            )
+        }
+    }
 }

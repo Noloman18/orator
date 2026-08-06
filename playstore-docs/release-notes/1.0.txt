@@ -1,0 +1,11 @@
+Version 1.0 (build 1)
+
+What's new in this release:
+
+- Read TXT, Markdown, EPUB, and text-based PDF documents offline
+- Import books into private app storage and keep saved reading progress
+- Narrate books with the device's installed text-to-speech engine
+- Control narration from the reader and playback notification
+- Adjust speech rate, pitch, voice, and reading-follow settings
+- Browse a local library with document metadata and progress
+- Documents and reading data stay on the device

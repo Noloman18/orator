@@ -141,6 +141,27 @@ class ReaderViewModel @Inject constructor(
     fun restart() = restartCompletedDocument.execute()
 
     fun seekTo(position: DocumentPosition) = seekNarration.execute(position)
+
+    fun seekToAbsoluteOffset(absoluteOffset: Long) {
+        val id = pageRequest.value ?: return
+        viewModelScope.launch {
+            val paragraph = contentRepository.paragraphContaining(
+                id,
+                absoluteOffset.coerceAtLeast(0L)
+            ) ?: return@launch
+            if (pageRequest.value != id) return@launch
+            val offset = (absoluteOffset - paragraph.absoluteStart)
+                .coerceIn(0L, paragraph.text.length.toLong())
+                .toInt()
+            seekTo(
+                DocumentPosition(
+                    paragraphIndex = paragraph.paragraphIndex,
+                    offsetInParagraph = offset,
+                    absoluteOffset = paragraph.absoluteStart + offset
+                )
+            )
+        }
+    }
 }
 
 private fun NarrationState.documentIdOrNull(): DocumentId? = when (this) {

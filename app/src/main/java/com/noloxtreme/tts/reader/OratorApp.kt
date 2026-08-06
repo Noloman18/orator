@@ -6,6 +6,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
@@ -72,6 +73,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.painterResource
@@ -93,6 +95,7 @@ import androidx.navigation.navArgument
 import androidx.paging.compose.collectAsLazyPagingItems
 import com.noloxtreme.tts.reader.domain.Document
 import com.noloxtreme.tts.reader.domain.DocumentId
+import com.noloxtreme.tts.reader.domain.DocumentPosition
 import com.noloxtreme.tts.reader.domain.ImportError
 import com.noloxtreme.tts.reader.domain.ImportSource
 import com.noloxtreme.tts.reader.domain.ImportState
@@ -111,11 +114,15 @@ import com.noloxtreme.tts.reader.ui.ReaderViewModel
 import com.noloxtreme.tts.reader.ui.ReaderLoadState
 import com.noloxtreme.tts.reader.ui.SettingsViewModel
 import com.noloxtreme.tts.reader.ui.theme.OratorTheme
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
+import kotlin.math.roundToLong
 
 private const val LIBRARY_ROUTE = "library"
 private const val SETTINGS_ROUTE = "settings"
 private const val READER_ROUTE = "reader/{documentId}"
+private const val SPLASH_DURATION_MILLIS = 5_000L
 private val SUPPORTED_PICKER_MIME_TYPES = arrayOf(
     "text/plain",
     "text/markdown",
@@ -132,33 +139,60 @@ fun OratorApp(appViewModel: AppViewModel = hiltViewModel()) {
         ThemePreference.LIGHT -> false
         ThemePreference.SYSTEM -> androidx.compose.foundation.isSystemInDarkTheme()
     }
+    var showSplash by remember { mutableStateOf(true) }
+
+    LaunchedEffect(Unit) {
+        delay(SPLASH_DURATION_MILLIS)
+        showSplash = false
+    }
+
     OratorTheme(darkTheme = darkTheme, dynamicColor = false) {
-        val navController = rememberNavController()
-        NavHost(
-            navController = navController,
-            startDestination = LIBRARY_ROUTE,
-            modifier = Modifier.fillMaxSize()
-        ) {
-            composable(LIBRARY_ROUTE) {
-                LibraryScreen(
-                    onOpenDocument = { id -> navController.navigate("reader/" + id.value) },
-                    onOpenSettings = { navController.navigate(SETTINGS_ROUTE) }
-                )
-            }
-            composable(
-                route = READER_ROUTE,
-                arguments = listOf(navArgument("documentId") { type = NavType.StringType })
-            ) { entry ->
-                ReaderScreen(
-                    documentId = DocumentId(entry.arguments?.getString("documentId").orEmpty()),
-                    onBack = { navController.popBackStack() },
-                    onOpenSettings = { navController.navigate(SETTINGS_ROUTE) }
-                )
-            }
-            composable(SETTINGS_ROUTE) {
-                SettingsScreen(onBack = { navController.popBackStack() })
+        if (showSplash) {
+            OratorSplashScreen()
+        } else {
+            val navController = rememberNavController()
+            NavHost(
+                navController = navController,
+                startDestination = LIBRARY_ROUTE,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                composable(LIBRARY_ROUTE) {
+                    LibraryScreen(
+                        onOpenDocument = { id -> navController.navigate("reader/" + id.value) },
+                        onOpenSettings = { navController.navigate(SETTINGS_ROUTE) }
+                    )
+                }
+                composable(
+                    route = READER_ROUTE,
+                    arguments = listOf(navArgument("documentId") { type = NavType.StringType })
+                ) { entry ->
+                    ReaderScreen(
+                        documentId = DocumentId(entry.arguments?.getString("documentId").orEmpty()),
+                        onBack = { navController.popBackStack() },
+                        onOpenSettings = { navController.navigate(SETTINGS_ROUTE) }
+                    )
+                }
+                composable(SETTINGS_ROUTE) {
+                    SettingsScreen(onBack = { navController.popBackStack() })
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun OratorSplashScreen() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+    ) {
+        Image(
+            painter = painterResource(R.drawable.orator_splash_art),
+            contentDescription = stringResource(R.string.splash_screen_description),
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize()
+        )
     }
 }
 
@@ -434,23 +468,37 @@ private fun ReaderScreen(
     val sectionTitle by viewModel.sectionTitle.collectAsState()
     val lazyParagraphs = viewModel.paragraphs.collectAsLazyPagingItems()
     val listState = rememberLazyListState()
-    val currentRange = (narration as? NarrationState.Playing)?.activeRange
-    val currentParagraphIndex = when (narration) {
-        is NarrationState.Playing -> (narration as NarrationState.Playing).safePosition.paragraphIndex
-        is NarrationState.Paused -> (narration as NarrationState.Paused).resumePosition.paragraphIndex
-        is NarrationState.Preparing -> (narration as NarrationState.Preparing).requestedPosition.paragraphIndex
-        else -> -1
-    }
+    val narrationPosition = narration.positionFor(documentId)
+    val currentRange = (narration as? NarrationState.Playing)
+        ?.takeIf { it.documentId == documentId }
+        ?.activeRange
+    val currentParagraphIndex = narrationPosition?.paragraphIndex ?: -1
+    val currentAbsoluteOffset = narrationPosition?.absoluteOffset
+        ?: progress?.position?.absoluteOffset
+        ?: 0L
+    val totalCharacterCount = document?.totalCharacterCount ?: 0L
     val playing = narration is NarrationState.Playing || narration is NarrationState.Preparing
     val playbackError = narration as? NarrationState.Error
     var followEnabled by remember { mutableStateOf(settings.followSpokenText) }
     var programmaticScroll by remember { mutableStateOf(false) }
+    var seekFraction by remember(documentId) { mutableStateOf(0f) }
+    var isSeeking by remember(documentId) { mutableStateOf(false) }
 
     LaunchedEffect(documentId) {
         viewModel.load(documentId)
     }
     LaunchedEffect(settings.followSpokenText) {
         followEnabled = settings.followSpokenText
+    }
+    LaunchedEffect(currentAbsoluteOffset, totalCharacterCount) {
+        if (!isSeeking) {
+            seekFraction = if (totalCharacterCount > 0L) {
+                (currentAbsoluteOffset.toFloat() / totalCharacterCount.toFloat())
+                    .coerceIn(0f, 1f)
+            } else {
+                0f
+            }
+        }
     }
     LaunchedEffect(currentParagraphIndex, settings.followSpokenText, followEnabled, lazyParagraphs.itemCount, sectionTitle) {
         if (settings.followSpokenText && followEnabled && currentParagraphIndex >= 0 && currentParagraphIndex < lazyParagraphs.itemCount) {
@@ -538,7 +586,19 @@ private fun ReaderScreen(
                         CircularProgressIndicator()
                     }
                 } else {
-                    val percentage = currentDocument.characterPercentage(progress)
+                    val displayFraction = if (isSeeking) {
+                        seekFraction
+                    } else {
+                        if (totalCharacterCount > 0L) {
+                            (currentAbsoluteOffset.toFloat() / totalCharacterCount.toFloat())
+                                .coerceIn(0f, 1f)
+                        } else {
+                            0f
+                        }
+                    }
+                    val percentage = (displayFraction * 100f)
+                        .roundToInt()
+                        .coerceIn(0, 100)
                     Box(Modifier.fillMaxSize().padding(padding)) {
                         Column(Modifier.fillMaxSize()) {
                             Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 10.dp)) {
@@ -549,9 +609,21 @@ private fun ReaderScreen(
                                     Text(stringResource(R.string.book_progress), style = MaterialTheme.typography.labelLarge)
                                     Text(stringResource(R.string.book_percentage, percentage), style = MaterialTheme.typography.labelLarge)
                                 }
-                                Spacer(Modifier.height(6.dp))
-                                LinearProgressIndicator(
-                                    progress = { percentage / 100f },
+                                Slider(
+                                    value = seekFraction,
+                                    onValueChange = {
+                                        isSeeking = true
+                                        seekFraction = it
+                                    },
+                                    onValueChangeFinished = {
+                                        val targetOffset = (
+                                            seekFraction * currentDocument.totalCharacterCount.toFloat()
+                                        ).roundToLong()
+                                        isSeeking = false
+                                        if (settings.followSpokenText) followEnabled = true
+                                        viewModel.seekToAbsoluteOffset(targetOffset)
+                                    },
+                                    enabled = currentDocument.totalCharacterCount > 0L,
                                     modifier = Modifier.fillMaxWidth()
                                 )
                             }
@@ -952,4 +1024,11 @@ private fun Document.characterPercentage(
     val total = totalCharacterCount.coerceAtLeast(1L)
     val offset = (progress?.position?.absoluteOffset ?: 0L).coerceIn(0L, total)
     return ((offset * 100L) / total).toInt().coerceIn(0, 100)
+}
+
+private fun NarrationState.positionFor(documentId: DocumentId): DocumentPosition? = when (this) {
+    is NarrationState.Preparing -> requestedPosition.takeIf { this.documentId == documentId }
+    is NarrationState.Playing -> safePosition.takeIf { this.documentId == documentId }
+    is NarrationState.Paused -> resumePosition.takeIf { this.documentId == documentId }
+    else -> null
 }
