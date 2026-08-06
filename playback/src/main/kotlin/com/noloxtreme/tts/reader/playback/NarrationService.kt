@@ -42,6 +42,9 @@ class NarrationService : MediaSessionService() {
     @Inject
     lateinit var contentRepository: ContentRepository
 
+    @Inject
+    lateinit var speechEngine: SpeechEngine
+
     private lateinit var player: TtsPlayer
     private lateinit var mediaSession: MediaSession
     private var artworkCache: Pair<String, ByteArray>? = null
@@ -118,12 +121,14 @@ class NarrationService : MediaSessionService() {
             }
         // A recreated media service may restore a paused document from the last start intent,
         // but it must never begin speaking without an explicit Play command.
+        super.onStartCommand(intent, flags, startId)
         return START_NOT_STICKY
     }
 
     override fun onDestroy() {
         mediaSession.release()
         player.release()
+        speechEngine.shutdown()
         super.onDestroy()
     }
 }

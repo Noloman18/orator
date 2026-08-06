@@ -16,4 +16,8 @@ class UpdateSpeechSettings @javax.inject.Inject constructor(
             speechPitch = speechPitch ?: current.speechPitch
         )
     }
+
+    suspend fun clearVoice() = settingsRepository.updateSettings { current ->
+        current.copy(voiceName = null)
+    }
 }

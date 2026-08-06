@@ -35,6 +35,7 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SkipNext
 import androidx.compose.material.icons.outlined.SkipPrevious
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -64,6 +65,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -96,6 +98,7 @@ import com.noloxtreme.tts.reader.domain.ImportSource
 import com.noloxtreme.tts.reader.domain.ImportState
 import com.noloxtreme.tts.reader.domain.LineHeightPreference
 import com.noloxtreme.tts.reader.domain.NarrationState
+import com.noloxtreme.tts.reader.domain.PlaybackError
 import com.noloxtreme.tts.reader.domain.SpokenRange
 import com.noloxtreme.tts.reader.domain.ThemePreference
 import com.noloxtreme.tts.reader.designsystem.BookPlaceholder
@@ -103,7 +106,9 @@ import com.noloxtreme.tts.reader.designsystem.R as DesignSystemR
 import com.noloxtreme.tts.reader.playback.NarrationService
 import com.noloxtreme.tts.reader.ui.AppViewModel
 import com.noloxtreme.tts.reader.ui.LibraryViewModel
+import com.noloxtreme.tts.reader.ui.LibraryLoadState
 import com.noloxtreme.tts.reader.ui.ReaderViewModel
+import com.noloxtreme.tts.reader.ui.ReaderLoadState
 import com.noloxtreme.tts.reader.ui.SettingsViewModel
 import com.noloxtreme.tts.reader.ui.theme.OratorTheme
 import kotlinx.coroutines.launch
@@ -159,12 +164,14 @@ private fun LibraryScreen(
     viewModel: LibraryViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val resources = LocalResources.current
     val documents by viewModel.documents.collectAsState()
     val continueDocument by viewModel.continueDocument.collectAsState()
+    val continueProgress by viewModel.continueProgress.collectAsState()
+    val libraryState by viewModel.libraryState.collectAsState()
     val importState by viewModel.importState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
     var documentToDelete by remember { mutableStateOf<Document?>(null) }
 
     val picker = rememberLauncherForActivityResult(
@@ -176,9 +183,18 @@ private fun LibraryScreen(
     LaunchedEffect(importState) {
         when (val state = importState) {
             is ImportState.Success -> scope.launch { snackbarHostState.showSnackbar(resources.getString(R.string.book_imported)) }
-            is ImportState.ExistingDocument -> scope.launch { snackbarHostState.showSnackbar(resources.getString(R.string.duplicate_book)) }
+            is ImportState.ExistingDocument -> {
+                onOpenDocument(state.documentId)
+                scope.launch { snackbarHostState.showSnackbar(resources.getString(R.string.duplicate_book)) }
+            }
             is ImportState.Failure -> scope.launch { snackbarHostState.showSnackbar(importErrorMessage(resources, state.error)) }
             else -> Unit
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.deleteFailure.collect {
+            snackbarHostState.showSnackbar(resources.getString(R.string.error_remove_book))
         }
     }
 
@@ -213,37 +229,53 @@ private fun LibraryScreen(
                 }
                 else -> Unit
             }
-            if (documents.isEmpty()) {
-                EmptyLibrary(onAddBook = {
-                    picker.launch(SUPPORTED_PICKER_MIME_TYPES)
-                })
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 96.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    if (continueDocument != null) {
+            when (libraryState) {
+                LibraryLoadState.Loading -> {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                }
+                LibraryLoadState.Error -> {
+                    ErrorState(
+                        title = stringResource(R.string.library_error_title),
+                        body = stringResource(R.string.library_error_body),
+                        action = stringResource(R.string.retry),
+                        onAction = viewModel::retryLibrary
+                    )
+                }
+                LibraryLoadState.Ready -> if (documents.isEmpty()) {
+                    EmptyLibrary(onAddBook = {
+                        picker.launch(SUPPORTED_PICKER_MIME_TYPES)
+                    })
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 96.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        if (continueDocument != null) {
+                            item {
+                                ContinueReadingCard(
+                                    document = continueDocument!!,
+                                    progress = continueProgress,
+                                    onClick = { onOpenDocument(continueDocument!!.id) }
+                                )
+                            }
+                        }
                         item {
-                            ContinueReadingCard(
-                                document = continueDocument!!,
-                                onClick = { onOpenDocument(continueDocument!!.id) }
+                            Text(
+                                text = pluralStringResource(R.plurals.books_count, documents.size, documents.size),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                    }
-                    item {
-                        Text(
-                            text = pluralStringResource(R.plurals.books_count, documents.size, documents.size),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    items(documents, key = { it.id.value }) { document ->
-                        DocumentCard(
-                            document = document,
-                            onClick = { onOpenDocument(document.id) },
-                            onDelete = { documentToDelete = document }
-                        )
+                        items(documents, key = { it.id.value }) { document ->
+                            DocumentCard(
+                                document = document,
+                                onClick = { onOpenDocument(document.id) },
+                                onDelete = { documentToDelete = document }
+                            )
+                        }
                     }
                 }
             }
@@ -254,7 +286,7 @@ private fun LibraryScreen(
         AlertDialog(
             onDismissRequest = { documentToDelete = null },
             title = { Text(stringResource(R.string.remove_book_title)) },
-            text = { Text(stringResource(R.string.remove_book_body)) },
+            text = { Text(stringResource(R.string.remove_book_body, document.title)) },
             confirmButton = {
                 TextButton(onClick = {
                     documentToDelete = null
@@ -297,6 +329,27 @@ private fun EmptyLibrary(onAddBook: () -> Unit) {
 }
 
 @Composable
+private fun ErrorState(
+    title: String,
+    body: String,
+    action: String,
+    onAction: () -> Unit
+) {
+    Box(
+        modifier = Modifier.fillMaxSize().padding(32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(title, style = MaterialTheme.typography.headlineSmall)
+            Spacer(Modifier.height(8.dp))
+            Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(18.dp))
+            Button(onClick = onAction) { Text(action) }
+        }
+    }
+}
+
+@Composable
 private fun DocumentCard(document: Document, onClick: () -> Unit, onDelete: () -> Unit) {
     Card(
         onClick = onClick,
@@ -328,7 +381,12 @@ private fun DocumentCard(document: Document, onClick: () -> Unit, onDelete: () -
 }
 
 @Composable
-private fun ContinueReadingCard(document: Document, onClick: () -> Unit) {
+private fun ContinueReadingCard(
+    document: Document,
+    progress: com.noloxtreme.tts.reader.domain.ReadingProgress?,
+    onClick: () -> Unit
+) {
+    val percentage = document.characterPercentage(progress)
     Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
@@ -344,6 +402,8 @@ private fun ContinueReadingCard(document: Document, onClick: () -> Unit) {
                 Text(stringResource(R.string.continue_reading), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
                 Spacer(Modifier.height(3.dp))
                 Text(document.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                Spacer(Modifier.height(6.dp))
+                Text(stringResource(R.string.book_percentage, percentage), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
             }
             Icon(Icons.Outlined.PlayArrow, contentDescription = stringResource(R.string.continue_reading), tint = MaterialTheme.colorScheme.onPrimaryContainer)
         }
@@ -359,7 +419,10 @@ private fun ReaderScreen(
     viewModel: ReaderViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val document by viewModel.document.collectAsState()
+    val loadState by viewModel.loadState.collectAsState()
+    val progress by viewModel.progress.collectAsState()
     val settings by viewModel.settings.collectAsState()
     val narration by viewModel.narration.collectAsState()
     val sectionTitle by viewModel.sectionTitle.collectAsState()
@@ -373,13 +436,38 @@ private fun ReaderScreen(
         else -> -1
     }
     val playing = narration is NarrationState.Playing || narration is NarrationState.Preparing
+    val playbackError = narration as? NarrationState.Error
+    var followEnabled by remember { mutableStateOf(settings.followSpokenText) }
+    var programmaticScroll by remember { mutableStateOf(false) }
 
     LaunchedEffect(documentId) {
         viewModel.load(documentId)
     }
-    LaunchedEffect(currentParagraphIndex, settings.followSpokenText) {
-        if (settings.followSpokenText && currentParagraphIndex >= 0 && currentParagraphIndex < lazyParagraphs.itemCount) {
-            listState.animateScrollToItem(currentParagraphIndex)
+    LaunchedEffect(settings.followSpokenText) {
+        followEnabled = settings.followSpokenText
+    }
+    LaunchedEffect(currentParagraphIndex, settings.followSpokenText, followEnabled, lazyParagraphs.itemCount, sectionTitle) {
+        if (settings.followSpokenText && followEnabled && currentParagraphIndex >= 0 && currentParagraphIndex < lazyParagraphs.itemCount) {
+            val itemIndex = currentParagraphIndex + if (sectionTitle != null) 1 else 0
+            if (itemIndex >= 0) {
+                programmaticScroll = true
+                try {
+                    listState.animateScrollToItem(itemIndex)
+                } finally {
+                    programmaticScroll = false
+                }
+            }
+        }
+    }
+    LaunchedEffect(listState, currentParagraphIndex) {
+        snapshotFlow {
+            listState.isScrollInProgress to listState.layoutInfo.visibleItemsInfo.map { it.key }
+        }.collect { (scrolling, visibleKeys) ->
+            if (scrolling && !programmaticScroll && currentParagraphIndex >= 0 &&
+                !visibleKeys.contains("paragraph-$currentParagraphIndex")
+            ) {
+                followEnabled = false
+            }
         }
     }
 
@@ -398,51 +486,125 @@ private fun ReaderScreen(
             )
         },
         bottomBar = {
-            ReaderControls(
-                narration = narration,
-                playing = playing,
-                onPrevious = viewModel::previousSentence,
-                onPlay = {
-                    val serviceIntent = android.content.Intent(context, NarrationService::class.java)
-                        .putExtra(NarrationService.EXTRA_DOCUMENT_ID, documentId.value)
-                    ContextCompat.startForegroundService(context, serviceIntent)
-                    if (narration is NarrationState.Completed) viewModel.restart() else if (playing) viewModel.pause() else viewModel.play()
-                },
-                onNext = viewModel::nextSentence
-            )
+            if (loadState == ReaderLoadState.Ready) {
+                ReaderControls(
+                    narration = narration,
+                    playing = playing,
+                    onPrevious = viewModel::previousSentence,
+                    onPlay = {
+                        if (!playing) {
+                            val serviceIntent = android.content.Intent(context, NarrationService::class.java)
+                                .putExtra(NarrationService.EXTRA_DOCUMENT_ID, documentId.value)
+                            ContextCompat.startForegroundService(context, serviceIntent)
+                        }
+                        if (narration is NarrationState.Completed) viewModel.restart() else if (playing) viewModel.pause() else viewModel.play()
+                    },
+                    onNext = viewModel::nextSentence
+                )
+            }
         }
     ) { padding ->
-        if (document == null) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+        when (loadState) {
+            ReaderLoadState.Loading -> {
+                Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
             }
-        } else {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize().padding(padding),
-                contentPadding = PaddingValues(start = 22.dp, end = 22.dp, top = 24.dp, bottom = 26.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp)
-            ) {
-                if (sectionTitle != null) {
-                    item {
-                        Text(
-                            text = sectionTitle!!,
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+            ReaderLoadState.MissingDocument -> {
+                Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(stringResource(R.string.missing_document_title), style = MaterialTheme.typography.headlineSmall)
+                        Spacer(Modifier.height(8.dp))
+                        Text(stringResource(R.string.missing_document_body), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(18.dp))
+                        Button(onClick = onBack) { Text(stringResource(R.string.back_to_library)) }
+                        TextButton(onClick = viewModel::retryLoad) { Text(stringResource(R.string.retry)) }
                     }
                 }
-                items(lazyParagraphs.itemCount, key = { index -> "paragraph-" + index }) { index ->
-                    val paragraph = lazyParagraphs[index]
-                    if (paragraph == null) {
-                        Spacer(Modifier.fillMaxWidth().height(90.dp))
-                    } else {
-                        ParagraphText(
-                            text = paragraph.text,
-                            activeRange = currentRange?.takeIf { it.paragraphIndex == paragraph.paragraphIndex },
-                            fontSizeSp = settings.readerFontSizeSp,
-                            lineHeight = settings.lineHeight
-                        )
+            }
+            ReaderLoadState.Ready -> {
+                val currentDocument = document
+                if (currentDocument == null) {
+                    Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                } else {
+                    val percentage = currentDocument.characterPercentage(progress)
+                    Box(Modifier.fillMaxSize().padding(padding)) {
+                        Column(Modifier.fillMaxSize()) {
+                            Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 10.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(stringResource(R.string.book_progress), style = MaterialTheme.typography.labelLarge)
+                                    Text(stringResource(R.string.book_percentage, percentage), style = MaterialTheme.typography.labelLarge)
+                                }
+                                Spacer(Modifier.height(6.dp))
+                                LinearProgressIndicator(
+                                    progress = { percentage / 100f },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                            playbackError?.let { error ->
+                                PlaybackErrorCard(
+                                    error = error.code,
+                                    onRetry = viewModel::play,
+                                    onOpenTtsSettings = {
+                                        context.startActivity(android.content.Intent("android.settings.TTS_SETTINGS"))
+                                    }
+                                )
+                            }
+                            LazyColumn(
+                                state = listState,
+                                modifier = Modifier.fillMaxWidth().weight(1f),
+                                contentPadding = PaddingValues(start = 22.dp, end = 22.dp, top = 12.dp, bottom = 26.dp),
+                                verticalArrangement = Arrangement.spacedBy(18.dp)
+                            ) {
+                                if (sectionTitle != null) {
+                                    item {
+                                        Text(
+                                            text = sectionTitle!!,
+                                            style = MaterialTheme.typography.labelLarge,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+                                items(lazyParagraphs.itemCount, key = { index -> "paragraph-" + index }) { index ->
+                                    val paragraph = lazyParagraphs[index]
+                                    if (paragraph == null) {
+                                        Spacer(Modifier.fillMaxWidth().height(90.dp))
+                                    } else {
+                                        ParagraphText(
+                                            text = paragraph.text,
+                                            activeRange = currentRange?.takeIf { it.paragraphIndex == paragraph.paragraphIndex },
+                                            fontSizeSp = settings.readerFontSizeSp,
+                                            lineHeight = settings.lineHeight
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        if (!followEnabled && currentParagraphIndex >= 0) {
+                            AssistChip(
+                                onClick = {
+                                    followEnabled = true
+                                    val itemIndex = currentParagraphIndex + if (sectionTitle != null) 1 else 0
+                                    if (itemIndex >= 0 && itemIndex < lazyParagraphs.itemCount + if (sectionTitle != null) 1 else 0) {
+                                        scope.launch {
+                                            programmaticScroll = true
+                                            try {
+                                                listState.animateScrollToItem(itemIndex)
+                                            } finally {
+                                                programmaticScroll = false
+                                            }
+                                        }
+                                    }
+                                },
+                                label = { Text(stringResource(R.string.return_to_narration)) },
+                                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -529,12 +691,50 @@ private fun ReaderControls(
     }
 }
 
+@Composable
+private fun PlaybackErrorCard(
+    error: PlaybackError,
+    onRetry: () -> Unit,
+    onOpenTtsSettings: () -> Unit
+) {
+    val needsTtsConfiguration = error == PlaybackError.TTS_UNAVAILABLE ||
+        error == PlaybackError.TTS_LANGUAGE_MISSING
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 6.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+    ) {
+        Column(Modifier.padding(14.dp)) {
+            Text(
+                text = playbackErrorMessage(error),
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
+                TextButton(onClick = onRetry) { Text(stringResource(R.string.retry)) }
+                if (needsTtsConfiguration) {
+                    TextButton(onClick = onOpenTtsSettings) { Text(stringResource(R.string.configure_tts)) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun playbackErrorMessage(error: PlaybackError): String = when (error) {
+    PlaybackError.TTS_UNAVAILABLE -> stringResource(R.string.playback_error_tts_unavailable)
+    PlaybackError.TTS_LANGUAGE_MISSING -> stringResource(R.string.playback_error_language_missing)
+    PlaybackError.TTS_SPEAK_FAILED -> stringResource(R.string.playback_error_speak_failed)
+    PlaybackError.AUDIO_FOCUS_DENIED -> stringResource(R.string.playback_error_audio_focus)
+    PlaybackError.DOCUMENT_MISSING -> stringResource(R.string.playback_error_document_missing)
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SettingsScreen(
     onBack: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
+    val context = LocalContext.current
     val settings by viewModel.settings.collectAsState()
     Scaffold(
         topBar = {
@@ -593,6 +793,12 @@ private fun SettingsScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(onClick = {
+                        context.startActivity(android.content.Intent("android.settings.TTS_SETTINGS"))
+                    }) {
+                        Text(stringResource(R.string.install_voice_data))
+                    }
                 } else {
                     val grouped = voices.groupBy { voice ->
                         java.util.Locale.forLanguageTag(voice.localeLanguageTag)
@@ -720,4 +926,12 @@ private fun importErrorMessage(resources: android.content.res.Resources, error: 
     ImportError.STORAGE_FULL -> resources.getString(R.string.error_storage_full)
     ImportError.DATABASE_ERROR -> resources.getString(R.string.error_database)
     ImportError.CANCELLED -> resources.getString(R.string.error_cancelled)
+}
+
+private fun Document.characterPercentage(
+    progress: com.noloxtreme.tts.reader.domain.ReadingProgress?
+): Int {
+    val total = totalCharacterCount.coerceAtLeast(1L)
+    val offset = (progress?.position?.absoluteOffset ?: 0L).coerceIn(0L, total)
+    return ((offset * 100L) / total).toInt().coerceIn(0, 100)
 }

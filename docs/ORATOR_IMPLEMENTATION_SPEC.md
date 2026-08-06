@@ -6,7 +6,7 @@ Application ID: com.noloxtreme.tts.reader
 Minimum Android version: API 24  
 Current UI technology: Kotlin and Jetpack Compose
 
-Implementation tracking note, updated 2026-08-06: checked items below mean the current repository contains the implementation or local verification evidence. Items that require physical-device playback, release verification, generated artwork, or formal acceptance recording remain unchecked until that work is actually done.
+Implementation tracking note, updated 2026-08-06: checked items below mean the current repository contains the implementation or local verification evidence. Items that require physical-device playback, release verification, generated artwork, or formal acceptance recording remain unchecked until that work is actually done. The 2026-08-06 review follow-up added explicit Library/Reader loading and missing-document states, character progress, user-controlled follow mode, TTS recovery actions, scoped deletion stop coordination, duplicate-import navigation, and a DI-backed parser registry; Compose/device acceptance tests remain pending.
 
 This document is the source of truth for Orator v1. Implement the decisions below as written. Do not substitute a cloud speech service, generate permanent audio files, add unsupported document formats, or change the persistence model without recording and approving a new architecture decision.
 

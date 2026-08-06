@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.withTimeoutOrNull
 
 data class SpeechConfiguration(
     val languageTag: String?,
@@ -190,8 +191,16 @@ class AndroidTtsEngine @Inject constructor(
                     }
                 }
             })
-        completion.await()
-        engine
+        val resolved = withTimeoutOrNull(TTS_INITIALIZATION_TIMEOUT_MS) {
+            completion.await()
+            engine
+        }
+        if (resolved == null) {
+            created?.shutdown()
+            engine = null
+            initialized = false
+        }
+        resolved
     }
 
     private fun selectOfflineVoice(
@@ -220,4 +229,8 @@ class AndroidTtsEngine @Inject constructor(
         languageTag?.takeIf { it.isNotBlank() }?.let(Locale::forLanguageTag)
             ?.takeUnless { it.language.isBlank() }
             ?: Locale.getDefault()
+
+    private companion object {
+        const val TTS_INITIALIZATION_TIMEOUT_MS = 5_000L
+    }
 }

@@ -14,6 +14,7 @@ import com.noloxtreme.tts.reader.domain.NarrationState
 import com.noloxtreme.tts.reader.domain.OratorSettings
 import com.noloxtreme.tts.reader.domain.Paragraph
 import com.noloxtreme.tts.reader.domain.ReadingProgress
+import com.noloxtreme.tts.reader.domain.usecase.ReaderContent
 import com.noloxtreme.tts.reader.domain.usecase.ObserveReaderContent
 import com.noloxtreme.tts.reader.domain.usecase.ObserveReadingProgress
 import com.noloxtreme.tts.reader.domain.usecase.ObserveSettings
@@ -25,6 +26,7 @@ import com.noloxtreme.tts.reader.domain.usecase.SkipSentence
 import com.noloxtreme.tts.reader.domain.usecase.StartOrResumeNarration
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -38,7 +40,14 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+sealed interface ReaderLoadState {
+    data object Loading : ReaderLoadState
+    data object Ready : ReaderLoadState
+    data object MissingDocument : ReaderLoadState
+}
+
 @HiltViewModel
+@OptIn(ExperimentalCoroutinesApi::class)
 class ReaderViewModel @Inject constructor(
     observeReaderContent: ObserveReaderContent,
     private val observeReadingProgress: ObserveReadingProgress,
@@ -59,9 +68,21 @@ class ReaderViewModel @Inject constructor(
         if (id == null) emptyFlow()
         else observeReaderContent.execute(id)
     }
-    val document: StateFlow<Document?> = readerContent
-        .map { it.document }
+    private val content: StateFlow<ReaderContent?> = readerContent
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    val document: StateFlow<Document?> = content
+        .map { it?.document }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val loadState: StateFlow<ReaderLoadState> = content
+        .map { value ->
+            when {
+                value == null -> ReaderLoadState.Loading
+                value.document == null -> ReaderLoadState.MissingDocument
+                else -> ReaderLoadState.Ready
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ReaderLoadState.Loading)
 
     val progress: StateFlow<ReadingProgress?> = pageRequest.flatMapLatest { id ->
         if (id == null) emptyFlow()
@@ -99,6 +120,13 @@ class ReaderViewModel @Inject constructor(
             pageRequest.value = id
             openDocument.execute(id)
             narrationController.dispatch(NarrationCommand.Load(id))
+        }
+    }
+
+    fun retryLoad() {
+        pageRequest.value?.let { id ->
+            pageRequest.value = null
+            load(id)
         }
     }
 

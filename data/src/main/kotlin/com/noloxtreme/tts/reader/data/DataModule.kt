@@ -11,6 +11,7 @@ import com.noloxtreme.tts.reader.domain.TimeProvider
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
+import dagger.multibindings.IntoSet
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
@@ -51,8 +52,21 @@ object DataProvidersModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): OratorDatabase =
         Room.databaseBuilder(context, OratorDatabase::class.java, "orator.db")
-            .fallbackToDestructiveMigration()
             .build()
+
+    @Provides
+    @IntoSet
+    fun provideTxtParser(): BookParser = TxtParser()
+
+    @Provides
+    @IntoSet
+    fun provideEpubParser(): BookParser = EpubParser()
+
+    @Provides
+    @Singleton
+    fun provideBookParserRegistry(
+        parsers: Set<@JvmSuppressWildcards BookParser>
+    ): BookParserRegistry = BookParserRegistry(parsers)
 
     @Provides
     fun provideDocumentDao(database: OratorDatabase): DocumentDao = database.documentDao()

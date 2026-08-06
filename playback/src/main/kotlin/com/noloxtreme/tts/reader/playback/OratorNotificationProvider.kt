@@ -34,8 +34,7 @@ class OratorNotificationProvider(
     ): MediaNotification {
         val player = session.player
         val metadata = player.mediaMetadata
-        val active = player.playbackState == Player.STATE_READY ||
-            player.playbackState == Player.STATE_BUFFERING
+        val active = player.playbackState == Player.STATE_BUFFERING || player.isPlaying
         val playing = player.isPlaying
 
         val builder = NotificationCompat.Builder(

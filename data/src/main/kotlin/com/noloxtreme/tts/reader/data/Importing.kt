@@ -40,7 +40,8 @@ private val TRANSIENT_DIRECTORY_NAME =
 class SafDocumentImporter @Inject constructor(
     @ApplicationContext private val context: Context,
     private val database: OratorDatabase,
-    private val timeProvider: com.noloxtreme.tts.reader.domain.TimeProvider
+    private val timeProvider: com.noloxtreme.tts.reader.domain.TimeProvider,
+    private val parserRegistry: BookParserRegistry
 ) : DocumentImporter {
     private val activeJob = AtomicReference<Job?>(null)
 
@@ -66,11 +67,8 @@ class SafDocumentImporter @Inject constructor(
                 send(ImportState.ExistingDocument(DocumentId(existing.id)))
                 return@channelFlow
             }
-            val format = resolveFormat(source, binarySource)
-            val extension = when (format) {
-                SourceFormat.TXT -> "txt"
-                SourceFormat.EPUB -> "epub"
-            }
+            val parser = parserRegistry.resolve(source, binarySource)
+            val extension = parser.extension
             val sourceFile = temporaryDirectory.resolve("source." + extension)
             check(binarySource.renameTo(sourceFile)) { "Unable to name imported source" }
             check(temporaryDirectory.renameTo(documentsRoot.resolve(documentId.value))) {
@@ -78,10 +76,6 @@ class SafDocumentImporter @Inject constructor(
             }
             finalDirectory = documentsRoot.resolve(documentId.value)
             send(ImportState.Parsing)
-            val parser = when (format) {
-                SourceFormat.TXT -> TxtParser()
-                SourceFormat.EPUB -> EpubParser()
-            }
             val finalizedSource = finalDirectory.resolve("source." + extension)
             val metadata = parser.readMetadata(finalizedSource, source.displayName)
             send(ImportState.Saving)
@@ -237,20 +231,6 @@ class SafDocumentImporter @Inject constructor(
         }
     }
 
-    private fun resolveFormat(source: ImportSource, file: File): SourceFormat {
-        val name = source.displayName.lowercase(Locale.ROOT)
-        val isEpubClaim = source.mimeType.equals("application/epub+zip", true) ||
-            name.endsWith(".epub")
-        val isTxtClaim = source.mimeType.equals("text/plain", true) || name.endsWith(".txt")
-        if (isEpubClaim && isTxtClaim) throw ImportException(ImportError.UNSUPPORTED_FORMAT)
-        if (isEpubClaim) {
-            if (!EpubParser.isEpub(file)) throw ImportException(ImportError.MALFORMED_DOCUMENT)
-            return SourceFormat.EPUB
-        }
-        if (isTxtClaim || source.mimeType == "application/octet-stream") return SourceFormat.TXT
-        throw ImportException(ImportError.UNSUPPORTED_FORMAT)
-    }
-
     private fun cleanupTransientDirectories(root: File) {
         val canonicalRoot = root.canonicalFile
         canonicalRoot.listFiles()?.forEach { entry ->
@@ -268,26 +248,46 @@ class SafDocumentImporter @Inject constructor(
     }
 }
 
-private enum class SourceFormat { TXT, EPUB }
-
-internal data class ParsedMetadata(
+data class ParsedMetadata(
     val title: String,
     val mimeType: String,
     val languageTag: String?
 )
 
-internal data class ParsedBlock(
+data class ParsedBlock(
     val text: String,
     val sectionIndex: Int,
     val sectionTitle: String?
 )
 
-internal interface BookParser {
+interface BookParser {
+    val extension: String
+    fun accepts(source: ImportSource): Boolean
+    fun validate(file: File) = Unit
     fun readMetadata(file: File, displayName: String): ParsedMetadata
     suspend fun forEachBlock(file: File, consumer: suspend (ParsedBlock) -> Unit)
 }
 
+class BookParserRegistry(
+    private val parsers: Set<BookParser>
+) {
+    fun resolve(source: ImportSource, file: File): BookParser {
+        val matches = parsers.filter { it.accepts(source) }
+        if (matches.size != 1) throw ImportException(ImportError.UNSUPPORTED_FORMAT)
+        return matches.single().also { it.validate(file) }
+    }
+}
+
 internal class TxtParser : BookParser {
+    override val extension: String = "txt"
+
+    override fun accepts(source: ImportSource): Boolean {
+        val name = source.displayName.lowercase(Locale.ROOT)
+        return source.mimeType.equals("text/plain", true) ||
+            name.endsWith(".txt") ||
+            (source.mimeType.equals("application/octet-stream", true) && !name.endsWith(".epub"))
+    }
+
     override fun readMetadata(file: File, displayName: String): ParsedMetadata =
         ParsedMetadata(
             title = MetadataNormalizer.normalizeTitle(

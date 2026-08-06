@@ -56,7 +56,10 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun setVoice(name: String?) {
-        viewModelScope.launch { updateSpeechSettings.execute(voiceName = name) }
+        viewModelScope.launch {
+            if (name == null) updateSpeechSettings.clearVoice()
+            else updateSpeechSettings.execute(voiceName = name)
+        }
     }
 
     fun setFontSize(value: Int) {
