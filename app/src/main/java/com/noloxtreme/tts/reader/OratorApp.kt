@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -83,7 +84,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -501,7 +501,10 @@ private fun ReaderScreen(
                         if (!playing) {
                             val serviceIntent = android.content.Intent(context, NarrationService::class.java)
                                 .putExtra(NarrationService.EXTRA_DOCUMENT_ID, documentId.value)
-                            ContextCompat.startForegroundService(context, serviceIntent)
+                            // Start while the reader is visible. Media3 promotes the service to
+                            // foreground in sync with playback, avoiding the platform's five-second
+                            // foreground-service deadline before narration has entered Playing.
+                            context.startService(serviceIntent)
                         }
                         if (narration is NarrationState.Completed) viewModel.restart() else if (playing) viewModel.pause() else viewModel.play()
                     },
@@ -669,9 +672,16 @@ private fun ReaderControls(
     onPlay: () -> Unit,
     onNext: () -> Unit
 ) {
-    Surface(tonalElevation = 4.dp) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding(),
+        tonalElevation = 4.dp
+    ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {

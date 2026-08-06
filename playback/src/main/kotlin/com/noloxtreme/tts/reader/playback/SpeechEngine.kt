@@ -1,6 +1,7 @@
 package com.noloxtreme.tts.reader.playback
 
 import android.content.Context
+import android.media.AudioAttributes
 import android.os.Bundle
 import android.os.Build
 import android.speech.tts.TextToSpeech
@@ -85,6 +86,12 @@ class AndroidTtsEngine @Inject constructor(
         if (initializationStatus != TextToSpeech.SUCCESS) {
             return SpeechInitialization.EngineUnavailable
         }
+        tts.setAudioAttributes(
+            AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build()
+        )
         val locale = localeFor(configuration.languageTag)
         val languageStatus = tts.setLanguage(locale)
         if (languageStatus == TextToSpeech.LANG_MISSING_DATA ||

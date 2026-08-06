@@ -70,8 +70,11 @@ class NarrationService : MediaSessionService() {
             )
         }
         mediaSession = sessionBuilder.build()
+        val notificationProvider = OratorNotificationProvider(this)
+        notificationProvider.ensureNotificationChannel()
+        setMediaNotificationProvider(notificationProvider)
         setShowNotificationForIdlePlayer(SHOW_NOTIFICATION_FOR_IDLE_PLAYER_AFTER_STOP_OR_ERROR)
-        setMediaNotificationProvider(OratorNotificationProvider(this))
+        addSession(mediaSession)
         lifecycleScope.launch {
             narrationController.state.collect { state ->
                 player.refreshState()
@@ -121,11 +124,13 @@ class NarrationService : MediaSessionService() {
             }
         // A recreated media service may restore a paused document from the last start intent,
         // but it must never begin speaking without an explicit Play command.
-        super.onStartCommand(intent, flags, startId)
-        return START_NOT_STICKY
+        return super.onStartCommand(intent, flags, startId)
     }
 
     override fun onDestroy() {
+        if (::mediaSession.isInitialized && isSessionAdded(mediaSession)) {
+            removeSession(mediaSession)
+        }
         mediaSession.release()
         player.release()
         speechEngine.shutdown()
@@ -195,7 +200,8 @@ private class TtsPlayer(
             is NarrationState.Paused -> Player.STATE_READY
             NarrationState.Idle -> Player.STATE_IDLE
         }
-        val playWhenReady = narrationState is NarrationState.Playing
+        val playWhenReady = narrationState is NarrationState.Playing ||
+            narrationState is NarrationState.Preparing
         return State.Builder()
             .setAvailableCommands(commands)
             .setPlayWhenReady(playWhenReady, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)

@@ -1,6 +1,9 @@
 package com.noloxtreme.tts.reader.playback
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
+import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.graphics.drawable.IconCompat
 import androidx.media3.common.Player
@@ -14,6 +17,24 @@ import com.google.common.collect.ImmutableList
 class OratorNotificationProvider(
     private val context: Context
 ) : MediaNotification.Provider {
+    /**
+     * Media3 reads the channel metadata from this provider, but custom providers still need to
+     * create their channel before the first foreground notification is posted.
+     */
+    fun ensureNotificationChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val manager = context.getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(
+            NotificationChannel(
+                NOTIFICATION_CHANNEL_ID,
+                context.getString(R.string.notification_channel),
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                setShowBadge(false)
+            }
+        )
+    }
+
     override fun getNotificationChannelInfo(): MediaNotification.Provider.NotificationChannelInfo =
         MediaNotification.Provider.NotificationChannelInfo(
             NOTIFICATION_CHANNEL_ID,
