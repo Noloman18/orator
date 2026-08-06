@@ -1141,19 +1141,19 @@ Generated title placeholder:
 
 ### 13.2 Asset checklist
 
-- [ ] Create artwork/orator-logo-master.svg as the editable master.
-- [ ] Create app/src/main/res/drawable/ic_launcher_foreground.xml with the book/wave symbol.
-- [ ] Create app/src/main/res/drawable/ic_launcher_background.xml using light primary #285E61.
-- [ ] Create app/src/main/res/drawable/ic_launcher_monochrome.xml as a one-color themed launcher icon and reference it from the API-level adaptive icon resources that support monochrome icons.
+- [x] Create artwork/orator-logo-master.svg as the editable master.
+- [x] Create app/src/main/res/drawable/ic_launcher_foreground.xml with the book/wave symbol.
+- [x] Create app/src/main/res/drawable/ic_launcher_background.xml using light primary #285E61.
+- [x] Create app/src/main/res/drawable/ic_launcher_monochrome.xml as a one-color themed launcher icon and reference it from the API-level adaptive icon resources that support monochrome icons.
 - [ ] Replace existing generic launcher images for all density buckets.
 - [ ] Create artwork/play-store-icon-512.png from the master.
-- [ ] Create playback/src/main/res/drawable/ic_notification.xml as a solid white-compatible silhouette with transparency.
-- [ ] Create designsystem/src/main/res/drawable/illustration_empty_library.xml.
-- [ ] Create reusable TXT and EPUB type indicators in :designsystem from the same icon family.
-- [ ] Use one consistent Material icon family for playback and settings actions.
-- [ ] Create light and dark splash theme resources using the launcher symbol.
-- [ ] Create a deterministic book placeholder composable using title initials and a palette selected from the SHA-256 prefix.
-- [ ] Document icon clear space, minimum size, and palette in artwork/README.md.
+- [x] Create playback/src/main/res/drawable/ic_notification.xml as a solid white-compatible silhouette with transparency.
+- [x] Create designsystem/src/main/res/drawable/illustration_empty_library.xml.
+- [x] Create reusable TXT and EPUB type indicators in :designsystem from the same icon family.
+- [x] Use one consistent Material icon family for playback and settings actions.
+- [x] Create light and dark splash theme resources using the launcher symbol.
+- [x] Create a deterministic book placeholder composable using title initials and a palette selected from the SHA-256 prefix.
+- [x] Document icon clear space, minimum size, and palette in artwork/README.md.
 - [ ] Verify all vector paths render without clipping in adaptive, circular, and squircle launcher masks.
 
 Do not add a decorative full-screen onboarding sequence.
@@ -1201,7 +1201,7 @@ TTS_SPEAK_FAILED retry policy:
 - [x] Exclude imported originals, Room document content, and progress from cloud/device-transfer backup.
 - [x] Configure res/xml/backup_rules.xml and res/xml/data_extraction_rules.xml to include only files/datastore/orator_settings.preferences_pb and exclude databases/orator.db, its journal files, and files/documents/.
 - [x] Add no analytics or crash-reporting network SDK in v1.
-- [ ] Confirm the release manifest contains no accidental network permission from merged dependencies.
+- [x] Confirm the release manifest contains no accidental network permission from merged dependencies.
 
 ### 15.1 Non-functional quality budgets
 
@@ -1234,7 +1234,7 @@ Use a release build for measurements. Record the device model, Android version, 
 - [x] Add a Hilt Application class and declare it in the manifest.
 - [x] Add AndroidX SplashScreen to MainActivity.
 - [x] Create the three navigation routes from Section 11.
-- [ ] Add a module dependency test or build-logic rule that prevents forbidden dependencies.
+- [x] Add a module dependency test or build-logic rule that prevents forbidden dependencies.
 - [x] Add docs/adr/0001-live-device-tts.md.
 - [x] Add docs/adr/0002-private-import-copy.md.
 - [x] Add docs/adr/0003-character-position-progress.md.
@@ -1244,7 +1244,7 @@ Use a release build for measurements. Record the device model, Android version, 
 Exit criteria:
 
 - [x] ./gradlew assembleDebug succeeds.
-- [ ] The app opens through the system splash into an empty Library shell.
+- [x] The app opens through the system splash into an empty Library shell.
 - [x] No lower module depends on :app.
 
 ## 17. Phase 1 — Domain and persistence
@@ -1273,7 +1273,7 @@ Exit criteria:
 
 ## 18. Phase 2 — Import and Library
 
-- [ ] Implement the OpenDocument launcher with only TXT and EPUB MIME types.
+- [x] Implement the OpenDocument launcher with only TXT and EPUB MIME types.
 - [x] Implement bounded source copying and SHA-256 hashing.
 - [x] Implement temporary import directories and fresh-process startup cleanup before enabling imports.
 - [x] Implement duplicate detection by SHA-256.
@@ -1366,14 +1366,14 @@ Exit criteria:
 - [x] Implement voice preview without changing book progress.
 - [ ] Generate and integrate all required assets in Section 13.2.
 - [ ] Replace generic launcher artwork.
-- [ ] Implement all localized error mappings.
+- [x] Implement all localized error mappings.
 - [x] Add backup exclusions.
 - [ ] Add accessibility checks for labels, target sizes, contrast, and 200% font scaling.
 - [ ] Remove hard-coded user-facing strings, force an RTL pseudo-locale, and verify navigation, controls, and reader alignment.
 - [ ] Add baseline profiles for app launch, Library, and Reader navigation.
 - [ ] Run static analysis, lint, unit tests, and instrumentation tests.
-- [ ] Inspect the merged release manifest for forbidden permissions.
-- [ ] Verify release code logs no document content.
+- [x] Inspect the merged release manifest for forbidden permissions.
+- [x] Verify release code logs no document content.
 - [x] Add docs/SUPPORTED_FORMATS.md.
 - [x] Add docs/PRIVACY_AND_BACKUP.md.
 - [x] Add docs/TEST_MATRIX.md recording tested API levels, devices, and TTS engines.
@@ -1382,8 +1382,8 @@ Exit criteria:
 
 - [ ] AC-022 through AC-027 pass.
 - [ ] All required graphics render correctly in light and dark themes.
-- [ ] The release manifest contains no INTERNET or broad-storage permission.
-- [ ] ./gradlew test lint assembleRelease succeeds.
+- [x] The release manifest contains no INTERNET or broad-storage permission.
+- [x] ./gradlew test lint assembleRelease succeeds.
 
 ## 22. Acceptance scenarios
 
@@ -1438,18 +1438,18 @@ Exit criteria:
 
 ### Architecture
 
-- [ ] All dependencies follow Section 5.
-- [ ] Domain code has no Android SDK dependency.
-- [ ] UI has no direct Room or TextToSpeech access.
-- [ ] Playback accesses storage only through domain interfaces.
-- [ ] Parsers are independently substitutable through their registry contract.
-- [ ] Production implementations can be replaced by fakes in unit tests.
+- [x] All dependencies follow Section 5.
+- [x] Domain code has no Android SDK dependency.
+- [x] UI has no direct Room or TextToSpeech access.
+- [x] Playback accesses storage only through domain interfaces.
+- [x] Parsers are independently substitutable through their registry contract.
+- [x] Production implementations can be replaced by fakes in unit tests.
 
 ### Quality
 
 - [ ] Unit, database, parser, service, and Compose tests pass.
 - [x] Android lint passes with no unapproved errors.
-- [ ] Release build succeeds.
+- [x] Release build succeeds.
 - [ ] All acceptance scenarios are recorded as passed in docs/TEST_MATRIX.md.
 - [ ] API 24, API 25, one API 26–32 device, and one API 33+ device have been tested.
 - [ ] At least two installed TTS engines have been tested when available; otherwise record the limitation.
@@ -1457,9 +1457,9 @@ Exit criteria:
 
 ### Artifacts
 
-- [ ] Architecture decision records exist and match the implementation.
+- [x] Architecture decision records exist and match the implementation.
 - [x] Room schema JSON is committed.
-- [ ] Supported-format and privacy documents are complete.
+- [x] Supported-format and privacy documents are complete.
 - [ ] Logo, launcher, monochrome, notification, splash, and empty-state assets are complete.
 - [ ] Light/dark phone and tablet screenshots are captured for internal review.
 - [ ] The default Android “Hello Android” UI and generic launcher art have been completely removed.

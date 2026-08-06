@@ -16,7 +16,7 @@ Android cloud backup and device-to-device transfer include only the user's setti
 - Included: `datastore/orator_settings.preferences_pb` (voice, rate, pitch, reader size, line height, follow mode, theme).
 - Excluded: `databases/orator.db` and its journal files (book metadata, paragraphs, progress), `files/documents/` (imported originals), and any other app files.
 
-This means a restored device shows the app's settings but the library is rebuilt by re-importing books. Backup rules live in `res/xml/backup_rules.xml` and `res/xml/data_extraction_rules.xml`, and `android:allowBackup="false"` is not used so that settings-only backup still applies on supported API levels.
+This means a restored device shows the app's settings but the library is rebuilt by re-importing books. Backup rules live in `res/xml/backup_rules.xml` and `res/xml/data_extraction_rules.xml`; backup is enabled so the settings-only include can apply on supported API levels.
 
 ## Permissions
 

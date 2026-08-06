@@ -12,6 +12,8 @@ import com.noloxtreme.tts.reader.domain.usecase.PauseNarration
 import com.noloxtreme.tts.reader.domain.usecase.UpdateReaderSettings
 import com.noloxtreme.tts.reader.domain.usecase.UpdateSpeechSettings
 import com.noloxtreme.tts.reader.playback.SpeechEngine
+import com.noloxtreme.tts.reader.playback.SpeechConfiguration
+import com.noloxtreme.tts.reader.playback.SpeechInitialization
 import com.noloxtreme.tts.reader.playback.VoiceInfo
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -80,7 +82,18 @@ class SettingsViewModel @Inject constructor(
             ) {
                 pauseNarration.execute()
             }
-            speechEngine.speakPreview(PREVIEW_SENTENCE)
+            val current = settings.value
+            val initialized = speechEngine.initialize(
+                SpeechConfiguration(
+                    languageTag = null,
+                    voiceName = current.voiceName,
+                    rate = current.speechRate,
+                    pitch = current.speechPitch
+                )
+            )
+            if (initialized == SpeechInitialization.Ready) {
+                speechEngine.speakPreview(PREVIEW_SENTENCE)
+            }
         }
     }
 }

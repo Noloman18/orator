@@ -12,6 +12,7 @@ import com.noloxtreme.tts.reader.domain.NarrationState
 import com.noloxtreme.tts.reader.domain.usecase.DeleteDocument
 import com.noloxtreme.tts.reader.domain.usecase.ImportDocument
 import com.noloxtreme.tts.reader.domain.usecase.ObserveLibrary
+import com.noloxtreme.tts.reader.domain.usecase.ObserveContinueDocument
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.Job
@@ -27,12 +28,16 @@ import kotlinx.coroutines.withTimeout
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
     observeLibrary: ObserveLibrary,
+    observeContinueDocument: ObserveContinueDocument,
     private val importDocument: ImportDocument,
     private val deleteDocument: DeleteDocument,
     private val narrationController: NarrationController
 ) : ViewModel() {
     val documents: StateFlow<List<Document>> = observeLibrary.execute()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val continueDocument: StateFlow<Document?> = observeContinueDocument.execute()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     private val mutableImportState = MutableStateFlow<ImportState>(ImportState.AwaitingPicker)
     val importState: StateFlow<ImportState> = mutableImportState.asStateFlow()

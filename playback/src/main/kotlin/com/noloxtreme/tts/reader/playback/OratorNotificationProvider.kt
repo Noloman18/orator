@@ -17,7 +17,7 @@ class OratorNotificationProvider(
     override fun getNotificationChannelInfo(): MediaNotification.Provider.NotificationChannelInfo =
         MediaNotification.Provider.NotificationChannelInfo(
             NOTIFICATION_CHANNEL_ID,
-            "Narration"
+            context.getString(R.string.notification_channel)
         )
 
     override fun handleCustomCommand(
@@ -43,9 +43,13 @@ class OratorNotificationProvider(
             NOTIFICATION_CHANNEL_ID
         )
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(metadata.title?.toString()?.takeIf { it.isNotBlank() } ?: "Orator")
+            .setContentTitle(
+                metadata.title?.toString()?.takeIf { it.isNotBlank() }
+                    ?: context.getString(R.string.notification_default_title)
+            )
             .setContentText(
-                metadata.artist?.toString()?.takeIf { it.isNotBlank() } ?: "Document"
+                metadata.artist?.toString()?.takeIf { it.isNotBlank() }
+                    ?: context.getString(R.string.notification_default_section)
             )
             .setOngoing(active)
             .setShowWhen(false)
@@ -56,7 +60,7 @@ class OratorNotificationProvider(
                 actionFactory.createMediaAction(
                     session,
                     IconCompat.createWithResource(context, PREVIOUS_ICON),
-                    "Previous sentence",
+                    context.getString(R.string.notification_previous),
                     Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM
                 )
             )
@@ -67,7 +71,7 @@ class OratorNotificationProvider(
                         context,
                         if (playing) PAUSE_ICON else PLAY_ICON
                     ),
-                    if (playing) "Pause" else "Play",
+                    context.getString(if (playing) R.string.notification_pause else R.string.notification_play),
                     Player.COMMAND_PLAY_PAUSE
                 )
             )
@@ -75,7 +79,7 @@ class OratorNotificationProvider(
                 actionFactory.createMediaAction(
                     session,
                     IconCompat.createWithResource(context, NEXT_ICON),
-                    "Next sentence",
+                    context.getString(R.string.notification_next),
                     Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM
                 )
             )

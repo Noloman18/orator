@@ -29,6 +29,10 @@ import kotlinx.coroutines.withContext
 @AndroidEntryPoint
 @UnstableApi
 class NarrationService : MediaSessionService() {
+    companion object {
+        const val EXTRA_DOCUMENT_ID = "com.noloxtreme.tts.reader.extra.DOCUMENT_ID"
+    }
+
     @Inject
     lateinit var narrationController: NarrationController
 
@@ -44,7 +48,12 @@ class NarrationService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
-        player = TtsPlayer(narrationController, Looper.getMainLooper())
+        player = TtsPlayer(
+            narrationController = narrationController,
+            applicationLooper = Looper.getMainLooper(),
+            fallbackTitle = getString(R.string.notification_default_title),
+            fallbackSection = getString(R.string.notification_default_section)
+        )
         val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
         val sessionBuilder = MediaSession.Builder(this, player).setId("orator")
         if (launchIntent != null) {
@@ -98,6 +107,20 @@ class NarrationService : MediaSessionService() {
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession = mediaSession
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        intent?.getStringExtra(EXTRA_DOCUMENT_ID)
+            ?.takeIf { it.isNotBlank() }
+            ?.let { id ->
+                val current = narrationController.state.value.documentId()
+                if (current?.value != id) {
+                    narrationController.dispatch(NarrationCommand.Load(DocumentId(id)))
+                }
+            }
+        // A recreated media service may restore a paused document from the last start intent,
+        // but it must never begin speaking without an explicit Play command.
+        return START_NOT_STICKY
+    }
+
     override fun onDestroy() {
         mediaSession.release()
         player.release()
@@ -113,7 +136,9 @@ private object PendingIntentFlags {
 @UnstableApi
 private class TtsPlayer(
     private val narrationController: NarrationController,
-    applicationLooper: Looper
+    applicationLooper: Looper,
+    private val fallbackTitle: String,
+    private val fallbackSection: String
 ) : SimpleBasePlayer(applicationLooper) {
     private var documentTitle: String? = null
     private var sectionTitle: String? = null
@@ -225,8 +250,8 @@ private class TtsPlayer(
                     .setMediaId(documentId.value)
                     .setMediaMetadata(
                         MediaMetadata.Builder()
-                            .setTitle(documentTitle ?: "Orator")
-                            .setArtist(sectionTitle?.takeIf { it.isNotBlank() } ?: "Document")
+                            .setTitle(documentTitle ?: fallbackTitle)
+                            .setArtist(sectionTitle?.takeIf { it.isNotBlank() } ?: fallbackSection)
                             .setArtworkData(artworkData, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
                             .build()
                     )
@@ -234,8 +259,8 @@ private class TtsPlayer(
             )
             .setMediaMetadata(
                 MediaMetadata.Builder()
-                    .setTitle(documentTitle ?: "Orator")
-                    .setArtist(sectionTitle?.takeIf { it.isNotBlank() } ?: "Document")
+                    .setTitle(documentTitle ?: fallbackTitle)
+                    .setArtist(sectionTitle?.takeIf { it.isNotBlank() } ?: fallbackSection)
                     .setArtworkData(artworkData, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
                     .build()
             )

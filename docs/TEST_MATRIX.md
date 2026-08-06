@@ -2,6 +2,14 @@
 
 Measurement method: automated Gradle test tasks; physical-device rows are recorded when executed and remain unchecked until then.
 
+Automated verification run on 2026-08-06 from the repository root:
+
+- `./gradlew test --no-configuration-cache --no-daemon --console=plain` — passed.
+- `./gradlew :app:lintDebug --no-configuration-cache --no-daemon --console=plain` — passed; report at `app/build/reports/lint-results-debug.html`.
+- `./gradlew checkModuleDependencyRules --no-configuration-cache --no-daemon --console=plain` — passed.
+- `./gradlew :app:assembleRelease --no-configuration-cache --no-daemon --console=plain` — passed; unsigned APK at `app/build/outputs/apk/release/app-release-unsigned.apk`.
+- Merged release manifest inspected at `app/build/intermediates/merged_manifests/release/processReleaseManifest/AndroidManifest.xml`; only Orator playback permissions plus the generated non-exported receiver permission remain. No `INTERNET`, `ACCESS_NETWORK_STATE`, broad-storage, media-storage, or boot-start permission is present.
+
 ## Automated unit and Robolectric tests (JVM)
 
 | Area | Module | Task |
@@ -64,6 +72,7 @@ Measurement method: automated Gradle test tasks; physical-device rows are record
 
 ## Quality gates
 
-- `./gradlew testDebugUnitTest` — all automated suites above
-- `./gradlew lint` — no unapproved errors
+- `./gradlew testDebugUnitTest` — all automated suites above (covered by the `test` run above)
+- `./gradlew lint` — no unapproved errors (the app debug lint task passed; library lint is included in the release lint-vital checks)
 - `./gradlew assembleRelease` — release build succeeds
+- `./gradlew checkModuleDependencyRules` — forbidden lower-layer project dependencies rejected

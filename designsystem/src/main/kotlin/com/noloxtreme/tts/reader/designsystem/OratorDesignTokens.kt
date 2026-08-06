@@ -6,8 +6,8 @@ import androidx.compose.ui.unit.sp
 
 /** Shared visual tokens. Feature modules consume these instead of inventing local values. */
 object OratorDesignTokens {
-    val primary = Color(0xFF315C7A)
-    val primaryContainer = Color(0xFFC9E6FF)
+    val primary = Color(0xFF285E61)
+    val primaryContainer = Color(0xFFB9DDDA)
     val secondary = Color(0xFF4D606F)
     val warmHighlight = Color(0xFFFFD54F)
     val readerHorizontalPadding = 22.dp

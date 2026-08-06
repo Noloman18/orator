@@ -6,37 +6,30 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.MenuBook
-import androidx.compose.material.icons.outlined.MoreVert
-import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.Replay
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SkipNext
@@ -47,10 +40,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -79,6 +70,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -88,7 +83,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -104,6 +98,8 @@ import com.noloxtreme.tts.reader.domain.LineHeightPreference
 import com.noloxtreme.tts.reader.domain.NarrationState
 import com.noloxtreme.tts.reader.domain.SpokenRange
 import com.noloxtreme.tts.reader.domain.ThemePreference
+import com.noloxtreme.tts.reader.designsystem.BookPlaceholder
+import com.noloxtreme.tts.reader.designsystem.R as DesignSystemR
 import com.noloxtreme.tts.reader.playback.NarrationService
 import com.noloxtreme.tts.reader.ui.AppViewModel
 import com.noloxtreme.tts.reader.ui.LibraryViewModel
@@ -115,6 +111,7 @@ import kotlinx.coroutines.launch
 private const val LIBRARY_ROUTE = "library"
 private const val SETTINGS_ROUTE = "settings"
 private const val READER_ROUTE = "reader/{documentId}"
+private val SUPPORTED_PICKER_MIME_TYPES = arrayOf("text/plain", "application/epub+zip")
 
 @Composable
 fun OratorApp(appViewModel: AppViewModel = hiltViewModel()) {
@@ -162,7 +159,9 @@ private fun LibraryScreen(
     viewModel: LibraryViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val documents by viewModel.documents.collectAsState()
+    val continueDocument by viewModel.continueDocument.collectAsState()
     val importState by viewModel.importState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -171,14 +170,14 @@ private fun LibraryScreen(
     val picker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
-        if (uri != null) viewModel.import(context.contentResolver.toImportSource(uri))
+        if (uri != null) viewModel.import(context.contentResolver.toImportSource(context, uri))
     }
 
     LaunchedEffect(importState) {
         when (val state = importState) {
-            is ImportState.Success -> scope.launch { snackbarHostState.showSnackbar("Book imported") }
-            is ImportState.ExistingDocument -> scope.launch { snackbarHostState.showSnackbar("That book is already in your library") }
-            is ImportState.Failure -> scope.launch { snackbarHostState.showSnackbar(importErrorMessage(state.error)) }
+            is ImportState.Success -> scope.launch { snackbarHostState.showSnackbar(resources.getString(R.string.book_imported)) }
+            is ImportState.ExistingDocument -> scope.launch { snackbarHostState.showSnackbar(resources.getString(R.string.duplicate_book)) }
+            is ImportState.Failure -> scope.launch { snackbarHostState.showSnackbar(importErrorMessage(resources, state.error)) }
             else -> Unit
         }
     }
@@ -186,19 +185,19 @@ private fun LibraryScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("Library", fontWeight = FontWeight.SemiBold) },
+                title = { Text(stringResource(R.string.library_title), fontWeight = FontWeight.SemiBold) },
                 actions = {
                     IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Outlined.Settings, contentDescription = "Settings")
+                        Icon(Icons.Outlined.Settings, contentDescription = stringResource(R.string.settings_title))
                     }
                 }
             )
         },
         floatingActionButton = {
             FloatingActionButton(onClick = {
-                picker.launch(arrayOf("text/plain", "application/epub+zip", "application/epub", "application/octet-stream"))
+                picker.launch(SUPPORTED_PICKER_MIME_TYPES)
             }) {
-                Icon(Icons.Outlined.Add, contentDescription = "Add book")
+                Icon(Icons.Outlined.Add, contentDescription = stringResource(R.string.add_book))
             }
         },
         snackbarHost = { SnackbarHost(snackbarHostState) }
@@ -216,7 +215,7 @@ private fun LibraryScreen(
             }
             if (documents.isEmpty()) {
                 EmptyLibrary(onAddBook = {
-                    picker.launch(arrayOf("text/plain", "application/epub+zip", "application/epub", "application/octet-stream"))
+                    picker.launch(SUPPORTED_PICKER_MIME_TYPES)
                 })
             } else {
                 LazyColumn(
@@ -224,9 +223,17 @@ private fun LibraryScreen(
                     contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 96.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    if (continueDocument != null) {
+                        item {
+                            ContinueReadingCard(
+                                document = continueDocument!!,
+                                onClick = { onOpenDocument(continueDocument!!.id) }
+                            )
+                        }
+                    }
                     item {
                         Text(
-                            text = documents.size.toString() + if (documents.size == 1) " book" else " books",
+                            text = pluralStringResource(R.plurals.books_count, documents.size, documents.size),
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -246,8 +253,8 @@ private fun LibraryScreen(
     documentToDelete?.let { document ->
         AlertDialog(
             onDismissRequest = { documentToDelete = null },
-            title = { Text("Remove book?") },
-            text = { Text("This removes the imported copy and its saved position from Orator." ) },
+            title = { Text(stringResource(R.string.remove_book_title)) },
+            text = { Text(stringResource(R.string.remove_book_body)) },
             confirmButton = {
                 TextButton(onClick = {
                     documentToDelete = null
@@ -256,9 +263,9 @@ private fun LibraryScreen(
                         // The repository is called by a short-lived child scope below.
                         viewModel.delete(document.id)
                     }
-                }) { Text("Remove") }
+                }) { Text(stringResource(R.string.remove)) }
             },
-            dismissButton = { TextButton(onClick = { documentToDelete = null }) { Text("Cancel") } }
+            dismissButton = { TextButton(onClick = { documentToDelete = null }) { Text(stringResource(R.string.cancel)) } }
         )
     }
 }
@@ -270,22 +277,21 @@ private fun EmptyLibrary(onAddBook: () -> Unit) {
         contentAlignment = Alignment.Center
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(
-                imageVector = Icons.Outlined.MenuBook,
+            Image(
+                painter = painterResource(DesignSystemR.drawable.illustration_empty_library),
                 contentDescription = null,
-                modifier = Modifier.size(56.dp),
-                tint = MaterialTheme.colorScheme.primary
+                modifier = Modifier.size(96.dp)
             )
             Spacer(Modifier.height(18.dp))
-            Text("Your library is empty", style = MaterialTheme.typography.headlineSmall)
+            Text(stringResource(R.string.empty_library_title), style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.height(8.dp))
             Text(
-                "Choose a TXT or non-DRM EPUB file stored on this phone.",
+                stringResource(R.string.empty_library_body),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.height(22.dp))
-            Button(onClick = onAddBook) { Text("Add your first book") }
+            Button(onClick = onAddBook) { Text(stringResource(R.string.add_first_book)) }
         }
     }
 }
@@ -301,12 +307,7 @@ private fun DocumentCard(document: Document, onClick: () -> Unit, onDelete: () -
             modifier = Modifier.fillMaxWidth().padding(18.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier.size(52.dp).clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.primaryContainer),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Outlined.MenuBook, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
-            }
+            BookPlaceholder(document.title, document.sha256, Modifier.size(52.dp))
             Spacer(Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(document.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -320,8 +321,31 @@ private fun DocumentCard(document: Document, onClick: () -> Unit, onDelete: () -
                 )
             }
             IconButton(onClick = onDelete) {
-                Icon(Icons.Outlined.Delete, contentDescription = "Remove book", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(Icons.Outlined.Delete, contentDescription = stringResource(R.string.remove_book_action), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+        }
+    }
+}
+
+@Composable
+private fun ContinueReadingCard(document: Document, onClick: () -> Unit) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(18.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            BookPlaceholder(document.title, document.sha256, Modifier.size(60.dp))
+            Spacer(Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(stringResource(R.string.continue_reading), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                Spacer(Modifier.height(3.dp))
+                Text(document.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onPrimaryContainer)
+            }
+            Icon(Icons.Outlined.PlayArrow, contentDescription = stringResource(R.string.continue_reading), tint = MaterialTheme.colorScheme.onPrimaryContainer)
         }
     }
 }
@@ -338,6 +362,7 @@ private fun ReaderScreen(
     val document by viewModel.document.collectAsState()
     val settings by viewModel.settings.collectAsState()
     val narration by viewModel.narration.collectAsState()
+    val sectionTitle by viewModel.sectionTitle.collectAsState()
     val lazyParagraphs = viewModel.paragraphs.collectAsLazyPagingItems()
     val listState = rememberLazyListState()
     val currentRange = (narration as? NarrationState.Playing)?.activeRange
@@ -362,13 +387,13 @@ private fun ReaderScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(document?.title ?: "Reader", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(document?.title ?: stringResource(R.string.reader_title), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.Outlined.ArrowBack, contentDescription = "Back") }
+                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = stringResource(R.string.back)) }
                 },
                 actions = {
-                    IconButton(onClick = onOpenSettings) { Icon(Icons.Outlined.Settings, contentDescription = "Settings") }
+                    IconButton(onClick = onOpenSettings) { Icon(Icons.Outlined.Settings, contentDescription = stringResource(R.string.settings_title)) }
                 }
             )
         },
@@ -378,7 +403,9 @@ private fun ReaderScreen(
                 playing = playing,
                 onPrevious = viewModel::previousSentence,
                 onPlay = {
-                    ContextCompat.startForegroundService(context, android.content.Intent(context, NarrationService::class.java))
+                    val serviceIntent = android.content.Intent(context, NarrationService::class.java)
+                        .putExtra(NarrationService.EXTRA_DOCUMENT_ID, documentId.value)
+                    ContextCompat.startForegroundService(context, serviceIntent)
                     if (narration is NarrationState.Completed) viewModel.restart() else if (playing) viewModel.pause() else viewModel.play()
                 },
                 onNext = viewModel::nextSentence
@@ -396,6 +423,15 @@ private fun ReaderScreen(
                 contentPadding = PaddingValues(start = 22.dp, end = 22.dp, top = 24.dp, bottom = 26.dp),
                 verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
+                if (sectionTitle != null) {
+                    item {
+                        Text(
+                            text = sectionTitle!!,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
                 items(lazyParagraphs.itemCount, key = { index -> "paragraph-" + index }) { index ->
                     val paragraph = lazyParagraphs[index]
                     if (paragraph == null) {
@@ -471,7 +507,7 @@ private fun ReaderControls(
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onPrevious) { Icon(Icons.Outlined.SkipPrevious, contentDescription = "Previous sentence") }
+            IconButton(onClick = onPrevious) { Icon(Icons.Outlined.SkipPrevious, contentDescription = stringResource(R.string.previous_sentence)) }
             IconButton(onClick = onPlay, modifier = Modifier.size(56.dp)) {
                 Icon(
                     imageVector = when {
@@ -479,12 +515,16 @@ private fun ReaderControls(
                         playing -> Icons.Outlined.Pause
                         else -> Icons.Outlined.PlayArrow
                     },
-                    contentDescription = if (playing) "Pause" else "Play",
+                    contentDescription = when {
+                        narration is NarrationState.Completed -> stringResource(R.string.replay)
+                        playing -> stringResource(R.string.pause)
+                        else -> stringResource(R.string.play)
+                    },
                     modifier = Modifier.size(34.dp),
                     tint = MaterialTheme.colorScheme.primary
                 )
             }
-            IconButton(onClick = onNext) { Icon(Icons.Outlined.SkipNext, contentDescription = "Next sentence") }
+            IconButton(onClick = onNext) { Icon(Icons.Outlined.SkipNext, contentDescription = stringResource(R.string.next_sentence)) }
         }
     }
 }
@@ -499,8 +539,8 @@ private fun SettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Settings") },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Outlined.ArrowBack, contentDescription = "Back") } }
+                title = { Text(stringResource(R.string.settings_title)) },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = stringResource(R.string.back)) } }
             )
         }
     ) { padding ->
@@ -510,26 +550,26 @@ private fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(22.dp)
         ) {
             item {
-                SettingSectionTitle("Appearance")
-                Text("Theme", style = MaterialTheme.typography.titleMedium)
+                SettingSectionTitle(stringResource(R.string.appearance))
+                Text(stringResource(R.string.theme), style = MaterialTheme.typography.titleMedium)
                 ChoiceRow(
                     options = ThemePreference.entries,
                     selected = settings.theme,
-                    label = { it.name.lowercase().replaceFirstChar(Char::uppercase) },
+                    label = { themeLabel(it) },
                     onSelected = viewModel::setTheme
                 )
                 Spacer(Modifier.height(14.dp))
-                Text("Line spacing", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.line_spacing), style = MaterialTheme.typography.titleMedium)
                 ChoiceRow(
                     options = LineHeightPreference.entries,
                     selected = settings.lineHeight,
-                    label = { it.name.lowercase().replaceFirstChar(Char::uppercase) },
+                    label = { lineHeightLabel(it) },
                     onSelected = viewModel::setLineHeight
                 )
             }
             item {
-                SettingSectionTitle("Reading")
-                Text("Text size: " + settings.readerFontSizeSp + " sp", style = MaterialTheme.typography.titleMedium)
+                SettingSectionTitle(stringResource(R.string.reading))
+                Text(stringResource(R.string.text_size, settings.readerFontSizeSp), style = MaterialTheme.typography.titleMedium)
                 Slider(
                     value = settings.readerFontSizeSp.toFloat(),
                     onValueChange = { viewModel.setFontSize(it.toInt()) },
@@ -538,18 +578,18 @@ private fun SettingsScreen(
                 )
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.weight(1f)) {
-                        Text("Follow spoken text", style = MaterialTheme.typography.titleMedium)
-                        Text("Keep the current sentence in view while playing.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(stringResource(R.string.follow_spoken_text), style = MaterialTheme.typography.titleMedium)
+                        Text(stringResource(R.string.follow_spoken_text_description), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Switch(checked = settings.followSpokenText, onCheckedChange = viewModel::setFollowSpokenText)
                 }
             }
             item {
-                SettingSectionTitle("Voice")
+                SettingSectionTitle(stringResource(R.string.voice))
                 val voices = viewModel.voices.collectAsState().value
                 if (voices.isEmpty()) {
                     Text(
-                        "No offline voices were found. Install a voice through the system settings.",
+                        stringResource(R.string.no_offline_voices),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -595,18 +635,18 @@ private fun SettingsScreen(
                     }
                 }
                 Spacer(Modifier.height(8.dp))
-                Text("Speech rate: " + settings.speechRate.toString().take(4) + "\u00D7", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.speech_rate, settings.speechRate.toString().take(4)), style = MaterialTheme.typography.titleMedium)
                 Slider(value = settings.speechRate, onValueChange = viewModel::setRate, valueRange = 0.5f..2f)
-                Text("Pitch: " + settings.speechPitch.toString().take(4) + "\u00D7", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.pitch, settings.speechPitch.toString().take(4)), style = MaterialTheme.typography.titleMedium)
                 Slider(value = settings.speechPitch, onValueChange = viewModel::setPitch, valueRange = 0.5f..1.5f)
                 Spacer(Modifier.height(6.dp))
                 OutlinedButton(onClick = viewModel::previewVoice) {
                     Icon(Icons.Outlined.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Preview voice")
+                    Text(stringResource(R.string.preview_voice))
                 }
                 Spacer(Modifier.height(8.dp))
-                Text("Orator uses an installed offline Android voice. Network voices are not selected.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(stringResource(R.string.offline_voice_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -621,7 +661,7 @@ private fun SettingSectionTitle(title: String) {
 private fun <T> ChoiceRow(
     options: List<T>,
     selected: T,
-    label: (T) -> String,
+    label: @Composable (T) -> String,
     onSelected: (T) -> Unit
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -635,7 +675,21 @@ private fun <T> ChoiceRow(
     }
 }
 
-private fun ContentResolver.toImportSource(uri: Uri): ImportSource {
+@Composable
+private fun themeLabel(value: ThemePreference): String = when (value) {
+    ThemePreference.LIGHT -> stringResource(R.string.theme_light)
+    ThemePreference.DARK -> stringResource(R.string.theme_dark)
+    ThemePreference.SYSTEM -> stringResource(R.string.theme_system)
+}
+
+@Composable
+private fun lineHeightLabel(value: LineHeightPreference): String = when (value) {
+    LineHeightPreference.COMPACT -> stringResource(R.string.line_height_compact)
+    LineHeightPreference.COMFORTABLE -> stringResource(R.string.line_height_comfortable)
+    LineHeightPreference.SPACIOUS -> stringResource(R.string.line_height_spacious)
+}
+
+private fun ContentResolver.toImportSource(context: Context, uri: Uri): ImportSource {
     var displayName: String? = null
     var size: Long? = null
     query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
@@ -648,22 +702,22 @@ private fun ContentResolver.toImportSource(uri: Uri): ImportSource {
     }
     return ImportSource(
         opaqueHandle = uri.toString(),
-        displayName = displayName?.takeIf { it.isNotBlank() } ?: "Imported book",
+        displayName = displayName?.takeIf { it.isNotBlank() } ?: context.getString(R.string.imported_book),
         mimeType = getType(uri) ?: "application/octet-stream",
         reportedSizeBytes = size
     )
 }
 
-private fun importErrorMessage(error: ImportError): String = when (error) {
-    ImportError.UNSUPPORTED_FORMAT -> "Choose a TXT or EPUB file"
-    ImportError.FILE_TOO_LARGE -> "The file is larger than 100 MB"
-    ImportError.SOURCE_UNREADABLE -> "Orator could not read that file"
-    ImportError.UNSUPPORTED_ENCODING -> "The text encoding is not supported"
-    ImportError.MALFORMED_DOCUMENT -> "The document is malformed"
-    ImportError.EPUB_ENCRYPTED -> "Encrypted EPUB files are not supported"
-    ImportError.EPUB_LIMIT_EXCEEDED -> "The EPUB exceeds Orator's safety limits"
-    ImportError.NO_READABLE_TEXT -> "No readable text was found"
-    ImportError.STORAGE_FULL -> "Not enough storage to import the book"
-    ImportError.DATABASE_ERROR -> "Could not save the imported book"
-    ImportError.CANCELLED -> "Import cancelled"
+private fun importErrorMessage(resources: android.content.res.Resources, error: ImportError): String = when (error) {
+    ImportError.UNSUPPORTED_FORMAT -> resources.getString(R.string.error_unsupported_format)
+    ImportError.FILE_TOO_LARGE -> resources.getString(R.string.error_file_too_large)
+    ImportError.SOURCE_UNREADABLE -> resources.getString(R.string.error_source_unreadable)
+    ImportError.UNSUPPORTED_ENCODING -> resources.getString(R.string.error_unsupported_encoding)
+    ImportError.MALFORMED_DOCUMENT -> resources.getString(R.string.error_malformed_document)
+    ImportError.EPUB_ENCRYPTED -> resources.getString(R.string.error_epub_encrypted)
+    ImportError.EPUB_LIMIT_EXCEEDED -> resources.getString(R.string.error_epub_limit)
+    ImportError.NO_READABLE_TEXT -> resources.getString(R.string.error_no_readable_text)
+    ImportError.STORAGE_FULL -> resources.getString(R.string.error_storage_full)
+    ImportError.DATABASE_ERROR -> resources.getString(R.string.error_database)
+    ImportError.CANCELLED -> resources.getString(R.string.error_cancelled)
 }
