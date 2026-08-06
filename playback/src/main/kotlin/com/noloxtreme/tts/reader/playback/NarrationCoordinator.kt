@@ -21,8 +21,8 @@ import java.util.Locale
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -36,6 +36,7 @@ import kotlinx.coroutines.sync.withLock
 private const val MAX_TTS_CHARS = 3000
 private const val CHECKPOINT_INTERVAL_MS = 1000L
 private const val CHECKPOINT_CHAR_INTERVAL = 400
+private const val MAX_TTS_RETRIES = 1
 
 @Singleton
 class NarrationCoordinator @Inject constructor(
@@ -45,19 +46,25 @@ class NarrationCoordinator @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val timeProvider: TimeProvider,
     private val speechEngine: SpeechEngine,
-    private val audioFocus: SpeechAudioFocus
+    private val audioFocus: AudioFocusController,
+    private val environment: NarrationEnvironment,
+    coordinatorContext: CoroutineDispatcher
 ) : NarrationController {
-    private val coordinatorScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val coordinatorScope = CoroutineScope(SupervisorJob() + coordinatorContext)
     private val mutex = Mutex()
     private val mutableState = MutableStateFlow<NarrationState>(NarrationState.Idle)
 
     private var document: Document? = null
     private var progress: ReadingProgress? = null
     private var activeSegment: SpeechSegment? = null
+    private var activeConfiguration: SpeechConfiguration? = null
     private var sessionToken: String? = null
     private var segmentNumber = 0
+    private var retryCount = 0
     private var lastCheckpointAt = 0L
     private var lastCheckpointOffset = -1L
+    private var resumeOnFocusGain = false
+    private var lastAppliedSettings: OratorSettings? = null
 
     override val state: StateFlow<NarrationState> = mutableState.asStateFlow()
 
@@ -65,6 +72,25 @@ class NarrationCoordinator @Inject constructor(
         coordinatorScope.launch {
             speechEngine.events.collectLatest { event ->
                 mutex.withLock { handleSpeechEvent(event) }
+            }
+        }
+        coordinatorScope.launch {
+            audioFocus.events.collectLatest { event ->
+                mutex.withLock { handleFocusEvent(event) }
+            }
+        }
+        coordinatorScope.launch {
+            settingsRepository.observeSettings().collectLatest { settings ->
+                mutex.withLock { handleSettingsChange(settings) }
+            }
+        }
+        coordinatorScope.launch {
+            environment.events.collectLatest { event ->
+                mutex.withLock {
+                    if (event == RouteEvent.Noisy && currentStateWasPlaying()) {
+                        pause(resumeOnFocusGain = false)
+                    }
+                }
             }
         }
     }
@@ -79,7 +105,7 @@ class NarrationCoordinator @Inject constructor(
         when (command) {
             is NarrationCommand.Load -> load(command.documentId)
             NarrationCommand.Play -> play()
-            is NarrationCommand.Pause -> pause()
+            is NarrationCommand.Pause -> pause(resumeOnFocusGain = false)
             NarrationCommand.PreviousSentence -> moveSentence(previous = true)
             NarrationCommand.NextSentence -> moveSentence(previous = false)
             is NarrationCommand.SeekTo -> seekTo(command.position)
@@ -91,6 +117,8 @@ class NarrationCoordinator @Inject constructor(
     private suspend fun load(id: DocumentId) {
         invalidateSession()
         audioFocus.abandon()
+        releasePlaybackResources()
+        resumeOnFocusGain = false
         val loaded = documentRepository.getDocument(id)
         if (loaded == null) {
             document = null
@@ -151,30 +179,34 @@ class NarrationCoordinator @Inject constructor(
     }
 
     private suspend fun startPlaybackSegment(paragraph: Paragraph, currentDocument: Document) {
+        retryCount = 0
         val currentPosition = progress?.position ?: paragraph.positionAt(0)
         mutableState.value = NarrationState.Preparing(currentDocument.id, currentPosition)
         if (!audioFocus.request()) {
             setError(currentDocument.id, PlaybackError.AUDIO_FOCUS_DENIED, true)
             return
         }
+        environment.acquireWakeLock()
+        environment.beginRouteMonitoring()
         val settings = settingsRepository.observeSettingsSnapshot()
-        val initialization = speechEngine.initialize(
-            SpeechConfiguration(
-                languageTag = currentDocument.languageTag,
-                voiceName = settings.voiceName,
-                rate = settings.speechRate,
-                pitch = settings.speechPitch
-            )
+        val configuration = SpeechConfiguration(
+            languageTag = currentDocument.languageTag,
+            voiceName = settings.voiceName,
+            rate = settings.speechRate,
+            pitch = settings.speechPitch
         )
-        when (initialization) {
+        activeConfiguration = configuration
+        when (speechEngine.initialize(configuration)) {
             SpeechInitialization.Ready -> Unit
             SpeechInitialization.EngineUnavailable -> {
                 audioFocus.abandon()
+                releasePlaybackResources()
                 setError(currentDocument.id, PlaybackError.TTS_UNAVAILABLE, true)
                 return
             }
             SpeechInitialization.LanguageUnavailable -> {
                 audioFocus.abandon()
+                releasePlaybackResources()
                 setError(currentDocument.id, PlaybackError.TTS_LANGUAGE_MISSING, true)
                 return
             }
@@ -183,6 +215,7 @@ class NarrationCoordinator @Inject constructor(
         val end = chooseEnd(paragraph.text, start)
         if (end <= start) {
             audioFocus.abandon()
+            releasePlaybackResources()
             setError(currentDocument.id, PlaybackError.TTS_SPEAK_FAILED, true)
             return
         }
@@ -202,15 +235,14 @@ class NarrationCoordinator @Inject constructor(
             SpokenRange(paragraph.paragraphIndex, start, end)
         )
         if (!speechEngine.speak(segment)) {
-            activeSegment = null
-            audioFocus.abandon()
-            setError(currentDocument.id, PlaybackError.TTS_SPEAK_FAILED, true)
+            handleSpeakFailure(segment, paragraph, currentDocument)
         }
     }
 
-    private suspend fun pause() {
+    private suspend fun pause(resumeOnFocusGain: Boolean) {
         val currentDocument = document ?: return
         if (mutableState.value is NarrationState.Completed) return
+        this.resumeOnFocusGain = resumeOnFocusGain
         val currentState = mutableState.value
         val resumePosition = when (currentState) {
             is NarrationState.Playing -> currentState.safePosition
@@ -220,6 +252,7 @@ class NarrationCoordinator @Inject constructor(
         }
         invalidateSession()
         audioFocus.abandon()
+        releasePlaybackResources()
         savePosition(resumePosition, false, force = true)
         mutableState.value = NarrationState.Paused(currentDocument.id, resumePosition, null)
     }
@@ -265,8 +298,15 @@ class NarrationCoordinator @Inject constructor(
         if (mutableState.value is NarrationState.Completed) return
         invalidateSession()
         audioFocus.abandon()
-        document?.let { mutableState.value = NarrationState.Paused(it.id, progress?.position ?: DocumentPosition(0, 0, 0), null) }
-            ?: run { mutableState.value = NarrationState.Idle }
+        releasePlaybackResources()
+        resumeOnFocusGain = false
+        document?.let {
+            mutableState.value = NarrationState.Paused(
+                it.id,
+                progress?.position ?: DocumentPosition(0, 0, 0),
+                null
+            )
+        } ?: run { mutableState.value = NarrationState.Idle }
     }
 
     private suspend fun restartCompleted() {
@@ -276,6 +316,41 @@ class NarrationCoordinator @Inject constructor(
         savePosition(first.positionAt(0), false, force = true)
         mutableState.value = NarrationState.Paused(currentDocument.id, first.positionAt(0), null)
         play()
+    }
+
+    private suspend fun handleSettingsChange(settings: OratorSettings) {
+        val previous = lastAppliedSettings
+        lastAppliedSettings = settings
+        val currentState = mutableState.value
+        if (currentState !is NarrationState.Playing) return
+        if (previous == null) return
+        if (previous.voiceName == settings.voiceName &&
+            previous.speechRate == settings.speechRate &&
+            previous.speechPitch == settings.speechPitch
+        ) {
+            return
+        }
+        savePosition(currentState.safePosition, false, force = true)
+        invalidateSession()
+        play()
+    }
+
+    private suspend fun handleFocusEvent(event: AudioFocusEvent) {
+        when (event) {
+            AudioFocusEvent.Gained -> {
+                if (resumeOnFocusGain && mutableState.value is NarrationState.Paused) {
+                    resumeOnFocusGain = false
+                    play()
+                }
+            }
+            AudioFocusEvent.TransientLoss -> {
+                if (currentStateWasPlaying()) pause(resumeOnFocusGain = true)
+            }
+            AudioFocusEvent.PermanentLoss,
+            AudioFocusEvent.Duck -> {
+                if (currentStateWasPlaying()) pause(resumeOnFocusGain = false)
+            }
+        }
     }
 
     private suspend fun handleSpeechEvent(event: SpeechEvent) {
@@ -304,7 +379,10 @@ class NarrationCoordinator @Inject constructor(
                     segment.startInParagraph,
                     segment.endExclusiveInParagraph
                 )
-                val end = (segment.startInParagraph + event.endExclusive).coerceIn(start + 1, segment.endExclusiveInParagraph)
+                val end = (segment.startInParagraph + event.endExclusive).coerceIn(
+                    start + 1,
+                    segment.endExclusiveInParagraph
+                )
                 val safePosition = paragraph.positionAt(start)
                 mutableState.value = NarrationState.Playing(
                     currentDocument.id,
@@ -314,12 +392,7 @@ class NarrationCoordinator @Inject constructor(
                 maybeCheckpoint(safePosition)
             }
             is SpeechEvent.Completed -> completeSegment(segment, paragraph, currentDocument)
-            is SpeechEvent.Failed -> {
-                maybeCheckpoint(paragraph.positionAt(segment.startInParagraph), force = true)
-                activeSegment = null
-                audioFocus.abandon()
-                setError(currentDocument.id, PlaybackError.TTS_SPEAK_FAILED, true)
-            }
+            is SpeechEvent.Failed -> handleSpeakFailure(segment, paragraph, currentDocument)
         }
     }
 
@@ -330,6 +403,7 @@ class NarrationCoordinator @Inject constructor(
     ) {
         val endPosition = paragraph.positionAt(segment.endExclusiveInParagraph)
         activeSegment = null
+        environment.releaseWakeLock()
         savePosition(endPosition, false, force = true)
         if (segment.endExclusiveInParagraph < paragraph.text.length) {
             startPlaybackSegment(paragraph, currentDocument)
@@ -344,12 +418,42 @@ class NarrationCoordinator @Inject constructor(
         }
     }
 
+    private suspend fun handleSpeakFailure(
+        segment: SpeechSegment,
+        paragraph: Paragraph,
+        currentDocument: Document
+    ) {
+        maybeCheckpoint(paragraph.positionAt(segment.startInParagraph), force = true)
+        if (retryCount < MAX_TTS_RETRIES) {
+            retryCount++
+            val configuration = activeConfiguration
+            if (configuration != null &&
+                speechEngine.initialize(configuration) == SpeechInitialization.Ready &&
+                speechEngine.speak(segment)
+            ) {
+                return
+            }
+        }
+        retryCount = 0
+        activeSegment = null
+        audioFocus.abandon()
+        releasePlaybackResources()
+        setError(currentDocument.id, PlaybackError.TTS_SPEAK_FAILED, true)
+    }
+
     private suspend fun markCompleted(id: DocumentId) {
         val current = progress?.position ?: DocumentPosition(0, 0, 0)
         savePosition(current, true, force = true)
         invalidateSession()
         audioFocus.abandon()
+        releasePlaybackResources()
+        resumeOnFocusGain = false
         mutableState.value = NarrationState.Completed(id)
+    }
+
+    private fun releasePlaybackResources() {
+        environment.releaseWakeLock()
+        environment.endRouteMonitoring()
     }
 
     private suspend fun savePosition(position: DocumentPosition, completed: Boolean, force: Boolean) {

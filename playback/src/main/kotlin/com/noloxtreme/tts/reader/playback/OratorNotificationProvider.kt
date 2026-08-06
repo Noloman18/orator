@@ -1,0 +1,106 @@
+package com.noloxtreme.tts.reader.playback
+
+import android.content.Context
+import androidx.core.app.NotificationCompat
+import androidx.core.graphics.drawable.IconCompat
+import androidx.media3.common.Player
+import androidx.media3.session.CommandButton
+import androidx.media3.session.MediaNotification
+import androidx.media3.session.MediaSession
+import com.google.common.collect.ImmutableList
+
+/** Media notification per spec Section 9.2: ongoing while active, dismissible when paused. */
+@androidx.media3.common.util.UnstableApi
+class OratorNotificationProvider(
+    private val context: Context
+) : MediaNotification.Provider {
+    override fun getNotificationChannelInfo(): MediaNotification.Provider.NotificationChannelInfo =
+        MediaNotification.Provider.NotificationChannelInfo(
+            NOTIFICATION_CHANNEL_ID,
+            "Narration"
+        )
+
+    override fun handleCustomCommand(
+        session: MediaSession,
+        customAction: String,
+        extras: android.os.Bundle
+    ): Boolean = false
+
+    override fun createNotification(
+        session: MediaSession,
+        customLayout: ImmutableList<CommandButton>,
+        actionFactory: MediaNotification.ActionFactory,
+        callback: MediaNotification.Provider.Callback
+    ): MediaNotification {
+        val player = session.player
+        val metadata = player.mediaMetadata
+        val active = player.playbackState == Player.STATE_READY ||
+            player.playbackState == Player.STATE_BUFFERING
+        val playing = player.isPlaying
+
+        val builder = NotificationCompat.Builder(
+            context,
+            NOTIFICATION_CHANNEL_ID
+        )
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(metadata.title?.toString()?.takeIf { it.isNotBlank() } ?: "Orator")
+            .setContentText(
+                metadata.artist?.toString()?.takeIf { it.isNotBlank() } ?: "Document"
+            )
+            .setOngoing(active)
+            .setShowWhen(false)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setContentIntent(session.sessionActivity)
+            .setDeleteIntent(actionFactory.createNotificationDismissalIntent(session))
+            .addAction(
+                actionFactory.createMediaAction(
+                    session,
+                    IconCompat.createWithResource(context, PREVIOUS_ICON),
+                    "Previous sentence",
+                    Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM
+                )
+            )
+            .addAction(
+                actionFactory.createMediaAction(
+                    session,
+                    IconCompat.createWithResource(
+                        context,
+                        if (playing) PAUSE_ICON else PLAY_ICON
+                    ),
+                    if (playing) "Pause" else "Play",
+                    Player.COMMAND_PLAY_PAUSE
+                )
+            )
+            .addAction(
+                actionFactory.createMediaAction(
+                    session,
+                    IconCompat.createWithResource(context, NEXT_ICON),
+                    "Next sentence",
+                    Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM
+                )
+            )
+
+        val artworkData = metadata.artworkData
+        if (artworkData != null) {
+            val bitmap = android.graphics.BitmapFactory.decodeByteArray(
+                artworkData,
+                0,
+                artworkData.size
+            )
+            if (bitmap != null) {
+                builder.setLargeIcon(bitmap)
+            }
+        }
+
+        return MediaNotification(NOTIFICATION_ID, builder.build())
+    }
+
+    private companion object {
+        const val NOTIFICATION_CHANNEL_ID = "orator_playback"
+        const val NOTIFICATION_ID = 1001
+        const val PREVIOUS_ICON = android.R.drawable.ic_media_previous
+        const val PLAY_ICON = android.R.drawable.ic_media_play
+        const val PAUSE_ICON = android.R.drawable.ic_media_pause
+        const val NEXT_ICON = android.R.drawable.ic_media_next
+    }
+}

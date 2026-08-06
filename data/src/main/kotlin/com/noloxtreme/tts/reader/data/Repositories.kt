@@ -139,7 +139,8 @@ class RoomContentRepository @Inject constructor(
 
 @Singleton
 class RoomProgressRepository @Inject constructor(
-    private val dao: ProgressDao
+    private val dao: ProgressDao,
+    private val contentDao: ContentDao
 ) : ProgressRepository {
     override fun observeProgress(id: DocumentId): Flow<ReadingProgress?> =
         dao.observe(id.value).map { it?.toDomain() }
@@ -148,7 +149,35 @@ class RoomProgressRepository @Inject constructor(
         dao.get(id.value)?.toDomain()
 
     override suspend fun saveProgress(progress: ReadingProgress) {
+        validateProgress(progress)
         dao.upsert(progress.toEntity())
+    }
+
+    private suspend fun validateProgress(progress: ReadingProgress) {
+        val paragraph = contentDao.getParagraph(
+            progress.documentId.value,
+            progress.position.paragraphIndex
+        ) ?: throw IllegalArgumentException(
+            "Progress references missing paragraph ${progress.position.paragraphIndex}"
+        )
+        require(progress.position.offsetInParagraph in 0..paragraph.text.length) {
+            "Progress offset ${progress.position.offsetInParagraph} is outside paragraph bounds"
+        }
+        require(progress.position.absoluteOffset ==
+            paragraph.absoluteStart + progress.position.offsetInParagraph
+        ) {
+            "Progress absolute offset is inconsistent with its paragraph"
+        }
+        if (progress.completed) {
+            val last = contentDao.lastParagraph(progress.documentId.value)
+                ?: throw IllegalArgumentException("Completed progress requires paragraphs")
+            require(
+                last.paragraphIndex == progress.position.paragraphIndex &&
+                    progress.position.offsetInParagraph == last.text.length
+            ) {
+                "Completed progress must point at the end of the final paragraph"
+            }
+        }
     }
 }
 

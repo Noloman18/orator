@@ -3,20 +3,36 @@ package com.noloxtreme.tts.reader.playback
 import com.noloxtreme.tts.reader.domain.NarrationController
 import dagger.Binds
 import dagger.Module
+import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 
 @Module
 @InstallIn(SingletonComponent::class)
-abstract class PlaybackModule {
-    @Binds
+object PlaybackModule {
+    @Provides
     @Singleton
-    abstract fun bindSpeechEngine(implementation: AndroidTtsEngine): SpeechEngine
+    fun provideCoordinatorDispatcher(): CoroutineDispatcher = Dispatchers.Main.immediate
 
-    @Binds
+    @Provides
     @Singleton
-    abstract fun bindNarrationController(
-        implementation: NarrationCoordinator
-    ): NarrationController
+    fun provideAudioFocusController(implementation: SpeechAudioFocus): AudioFocusController =
+        implementation
+
+    @Provides
+    @Singleton
+    fun provideNarrationEnvironment(implementation: AndroidNarrationEnvironment): NarrationEnvironment =
+        implementation
+
+    @Provides
+    @Singleton
+    fun bindSpeechEngine(implementation: AndroidTtsEngine): SpeechEngine = implementation
+
+    @Provides
+    @Singleton
+    fun bindNarrationController(implementation: NarrationCoordinator): NarrationController =
+        implementation
 }

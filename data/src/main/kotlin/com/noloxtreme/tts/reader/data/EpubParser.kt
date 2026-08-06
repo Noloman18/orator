@@ -19,13 +19,13 @@ internal class EpubParser : BookParser {
     override fun readMetadata(file: File, displayName: String): ParsedMetadata =
         openBook(file, displayName).use { it.metadata }
 
-    override suspend fun forEachParagraph(
+    override suspend fun forEachBlock(
         file: File,
-        consumer: suspend (String) -> Unit
+        consumer: suspend (ParsedBlock) -> Unit
     ) {
         openBook(file, file.name).use { book ->
             var totalRead = 0L
-            for (item in book.spine) {
+            for ((index, item) in book.spine.withIndex()) {
                 val entry = book.zip.getEntry(item.href)
                     ?: throw ImportException(ImportError.MALFORMED_DOCUMENT)
                 val bytes = readEntry(book.zip, entry)
@@ -38,14 +38,22 @@ internal class EpubParser : BookParser {
                     item.href
                 )
                 document.select("script,style,nav,form,svg,img,audio,video,iframe").remove()
-                val blocks = document.select("h1,h2,h3,h4,h5,h6,p,li,blockquote,pre")
-                    .map { it.text().trim() }
-                    .filter { it.isNotBlank() }
-                if (blocks.isEmpty()) {
+                val sectionTitle = document.select("h1,h2,h3,h4,h5,h6")
+                    .firstOrNull()?.text()?.trim()
+                    ?.takeIf { it.isNotBlank() }
+                    ?: book.navLabels[item.href]
+                var emitted = false
+                for (block in document.select("h1,h2,h3,h4,h5,h6,p,li,blockquote,pre")) {
+                    val text = block.text().trim()
+                    if (text.isBlank()) continue
+                    consumer(ParsedBlock(text, index, sectionTitle))
+                    emitted = true
+                }
+                if (!emitted) {
                     val bodyText = document.body()?.text()?.trim()
-                    if (!bodyText.isNullOrBlank()) consumer(bodyText)
-                } else {
-                    for (block in blocks) consumer(block)
+                    if (!bodyText.isNullOrBlank()) {
+                        consumer(ParsedBlock(bodyText, index, sectionTitle))
+                    }
                 }
             }
         }
@@ -67,14 +75,16 @@ internal class EpubParser : BookParser {
 private class ParsedEpub(
     val zip: ZipFile,
     val metadata: ParsedMetadata,
-    val spine: List<SpineItem>
+    val spine: List<SpineItem>,
+    val navLabels: Map<String, String>
 ) : AutoCloseable {
     override fun close() = zip.close()
 }
 
 private data class SpineItem(
     val href: String,
-    val mediaType: String
+    val mediaType: String,
+    val properties: String?
 )
 
 private fun openBook(file: File, displayName: String): ParsedEpub {
@@ -120,7 +130,9 @@ private fun openBook(file: File, displayName: String): ParsedEpub {
             val id = item.getAttribute("id")
             val href = safeZipPath(basePath, item.getAttribute("href"))
             val mediaType = item.getAttribute("media-type")
-            if (id.isNotBlank()) manifest[id] = SpineItem(href, mediaType)
+            if (id.isNotBlank()) {
+                manifest[id] = SpineItem(href, mediaType, item.getAttribute("properties"))
+            }
         }
         val spineElement = opf.getElementsByTagNameNS("*", "spine")
             .item(0) as? Element
@@ -139,23 +151,68 @@ private fun openBook(file: File, displayName: String): ParsedEpub {
             ?.textContent?.trim()
             ?.takeIf { it.isNotBlank() }
             ?: displayName.substringBeforeLast('.', displayName)
-                .trim()
-                .ifBlank { "Untitled book" }
         val language = opf.getElementsByTagNameNS("*", "language").item(0)
             ?.textContent?.trim()
             ?.takeIf { it.isNotBlank() }
             ?.let { Locale.forLanguageTag(it).toLanguageTag() }
             ?.takeIf { it != Locale.ROOT.toLanguageTag() }
+        val navLabels = navLabelsFor(zip, manifest, opf, basePath, opfPath)
         return ParsedEpub(
             zip = zip,
-            metadata = ParsedMetadata(title.take(200), "application/epub+zip", language),
-            spine = spine
+            metadata = ParsedMetadata(
+                title = MetadataNormalizer.normalizeTitle(title),
+                mimeType = "application/epub+zip",
+                languageTag = language
+            ),
+            spine = spine,
+            navLabels = navLabels
         )
     } catch (error: Throwable) {
         zip.close()
         if (error is ImportException) throw error
         throw ImportException(ImportError.MALFORMED_DOCUMENT)
     }
+}
+
+private fun navLabelsFor(
+    zip: ZipFile,
+    manifest: Map<String, SpineItem>,
+    opf: org.w3c.dom.Document,
+    basePath: String,
+    opfPath: String
+): Map<String, String> {
+    val navItem = manifest.values.firstOrNull { item ->
+        item.mediaType == "application/xhtml+xml" &&
+            item.properties?.split(' ')?.any { it == "nav" } == true
+    } ?: run {
+        val reference = opf.getElementsByTagNameNS("*", "reference").item(0) as? Element
+        reference?.takeIf { it.getAttribute("type") == "toc" }
+            ?.getAttribute("href")
+            ?.takeIf { it.isNotBlank() }
+            ?.let { href -> manifest.values.firstOrNull { item -> item.href == safeZipPath(basePath, href) } }
+    } ?: return emptyMap()
+    val entry = zip.getEntry(navItem.href) ?: return emptyMap()
+    val navDocument = try {
+        Jsoup.parse(String(readEntry(zip, entry), StandardCharsets.UTF_8), navItem.href)
+    } catch (_: Throwable) {
+        return emptyMap()
+    }
+    val labels = linkedMapOf<String, String>()
+    for (anchor in navDocument.select("nav a[href], [epub\\:type=toc] a[href], a[href]")) {
+        val label = anchor.text().trim()
+        if (label.isBlank()) continue
+        val target = anchor.attr("href").substringBefore('#')
+        if (target.isBlank()) continue
+        val targetPath = safeZipPathOrNull(navItem.href.substringBeforeLast('/', ""), target) ?: continue
+        if (targetPath !in labels) labels[targetPath] = label
+    }
+    return labels
+}
+
+private fun safeZipPathOrNull(base: String, href: String): String? = try {
+    safeZipPath(base, href)
+} catch (_: Throwable) {
+    null
 }
 
 private fun readEntry(zip: ZipFile, entry: java.util.zip.ZipEntry): ByteArray {
@@ -190,8 +247,8 @@ private fun parseXml(bytes: ByteArray): org.w3c.dom.Document =
             isXIncludeAware = false
             isExpandEntityReferences = false
         }.newDocumentBuilder().parse(bytes.inputStream())
-    } catch (_: Throwable) {
-        throw ImportException(ImportError.MALFORMED_DOCUMENT)
+    } catch (error: Throwable) {
+        throw ImportException(ImportError.MALFORMED_DOCUMENT).apply { initCause(error) }
     }
 
 private fun safeZipPath(base: String, href: String): String {

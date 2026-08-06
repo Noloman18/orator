@@ -1,5 +1,6 @@
 package com.noloxtreme.tts.reader.playback
 
+import android.content.Intent
 import android.os.Bundle
 import android.os.Looper
 import androidx.lifecycle.lifecycleScope
@@ -12,35 +13,87 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.google.common.util.concurrent.Futures
+import com.noloxtreme.tts.reader.domain.ContentRepository
+import com.noloxtreme.tts.reader.domain.Document
 import com.noloxtreme.tts.reader.domain.DocumentId
+import com.noloxtreme.tts.reader.domain.DocumentRepository
 import com.noloxtreme.tts.reader.domain.NarrationCommand
 import com.noloxtreme.tts.reader.domain.NarrationController
 import com.noloxtreme.tts.reader.domain.NarrationState
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @AndroidEntryPoint
-@OptIn(UnstableApi::class)
+@UnstableApi
 class NarrationService : MediaSessionService() {
     @Inject
     lateinit var narrationController: NarrationController
 
+    @Inject
+    lateinit var documentRepository: DocumentRepository
+
+    @Inject
+    lateinit var contentRepository: ContentRepository
+
     private lateinit var player: TtsPlayer
     private lateinit var mediaSession: MediaSession
+    private var artworkCache: Pair<String, ByteArray>? = null
 
     override fun onCreate() {
         super.onCreate()
         player = TtsPlayer(narrationController, Looper.getMainLooper())
-        mediaSession = MediaSession.Builder(this, player)
-            .setId("orator")
-            .build()
+        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+        val sessionBuilder = MediaSession.Builder(this, player).setId("orator")
+        if (launchIntent != null) {
+            sessionBuilder.setSessionActivity(
+                android.app.PendingIntent.getActivity(
+                    this,
+                    0,
+                    launchIntent.apply { flags = Intent.FLAG_ACTIVITY_SINGLE_TOP },
+                    PendingIntentFlags.IMMUTABLE or PendingIntentFlags.UPDATE_CURRENT
+                )
+            )
+        }
+        mediaSession = sessionBuilder.build()
         setShowNotificationForIdlePlayer(SHOW_NOTIFICATION_FOR_IDLE_PLAYER_AFTER_STOP_OR_ERROR)
+        setMediaNotificationProvider(OratorNotificationProvider(this))
         lifecycleScope.launch {
-            narrationController.state.collect {
-                player.refresh()
+            narrationController.state.collect { state ->
+                player.refreshState()
+                updateMetadata(state)
             }
         }
+    }
+
+    private suspend fun updateMetadata(state: NarrationState) {
+        val documentId = state.documentId()
+        if (documentId == null) {
+            player.setDocumentMetadata(null, null, null)
+            return
+        }
+        val document = documentRepository.getDocument(documentId)
+        val paragraphIndex = state.activeParagraphIndex()
+        val sectionTitle = document?.let { currentDocument ->
+            if (paragraphIndex >= 0) {
+                val paragraph = contentRepository.paragraph(currentDocument.id, paragraphIndex)
+                paragraph?.let { contentRepository.section(currentDocument.id, it.sectionIndex)?.title }
+            } else {
+                null
+            }
+        }
+        val artwork = document?.let { cachedArtwork(it) }
+        player.setDocumentMetadata(document, sectionTitle, artwork)
+    }
+
+    private suspend fun cachedArtwork(document: Document): ByteArray? {
+        val cached = artworkCache
+        if (cached != null && cached.first == document.id.value) return cached.second
+        return withContext(Dispatchers.Default) {
+            PlaceholderArtworkRenderer.renderPng(document.title, document.sha256)
+        }.also { artworkCache = document.id.value to it }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession = mediaSession
@@ -52,11 +105,20 @@ class NarrationService : MediaSessionService() {
     }
 }
 
-@OptIn(UnstableApi::class)
+private object PendingIntentFlags {
+    const val IMMUTABLE = android.app.PendingIntent.FLAG_IMMUTABLE
+    const val UPDATE_CURRENT = android.app.PendingIntent.FLAG_UPDATE_CURRENT
+}
+
+@UnstableApi
 private class TtsPlayer(
     private val narrationController: NarrationController,
     applicationLooper: Looper
 ) : SimpleBasePlayer(applicationLooper) {
+    private var documentTitle: String? = null
+    private var sectionTitle: String? = null
+    private var artworkData: ByteArray? = null
+
     private val commands = Player.Commands.Builder()
         .add(Player.COMMAND_PLAY_PAUSE)
         .add(Player.COMMAND_PREPARE)
@@ -72,20 +134,24 @@ private class TtsPlayer(
         .add(Player.COMMAND_RELEASE)
         .build()
 
-    fun refresh() {
+    fun refreshState() {
+        invalidateState()
+    }
+
+    fun setDocumentMetadata(
+        document: Document?,
+        sectionTitle: String?,
+        artworkData: ByteArray?
+    ) {
+        this.documentTitle = document?.title
+        this.sectionTitle = sectionTitle
+        this.artworkData = artworkData
         invalidateState()
     }
 
     override fun getState(): State {
         val narrationState = narrationController.state.value
-        val documentId = when (narrationState) {
-            is NarrationState.Preparing -> narrationState.documentId
-            is NarrationState.Playing -> narrationState.documentId
-            is NarrationState.Paused -> narrationState.documentId
-            is NarrationState.Completed -> narrationState.documentId
-            is NarrationState.Error -> narrationState.documentId
-            NarrationState.Idle -> null
-        }
+        val documentId = narrationState.documentId()
         val mediaItems = if (documentId == null) {
             emptyList()
         } else {
@@ -106,7 +172,7 @@ private class TtsPlayer(
             .setPlaybackState(playbackState)
             .setPlaylist(mediaItems)
             .setCurrentMediaItemIndex(if (mediaItems.isEmpty()) C.INDEX_UNSET else 0)
-            .setContentPositionMs(0L)
+            .setContentPositionMs(C.TIME_UNSET)
             .build()
     }
 
@@ -123,7 +189,7 @@ private class TtsPlayer(
     }
 
     override fun handleRelease() = Futures.immediateVoidFuture().also {
-        narrationController.dispatch(NarrationCommand.Pause(userInitiated = false))
+        narrationController.dispatch(NarrationCommand.Stop)
     }
 
     override fun handleSetMediaItems(
@@ -159,19 +225,37 @@ private class TtsPlayer(
                     .setMediaId(documentId.value)
                     .setMediaMetadata(
                         MediaMetadata.Builder()
-                            .setTitle("Orator")
-                            .setArtist("Text-to-speech reader")
+                            .setTitle(documentTitle ?: "Orator")
+                            .setArtist(sectionTitle?.takeIf { it.isNotBlank() } ?: "Document")
+                            .setArtworkData(artworkData, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
                             .build()
                     )
                     .build()
             )
             .setMediaMetadata(
                 MediaMetadata.Builder()
-                    .setTitle("Orator")
-                    .setArtist("Text-to-speech reader")
+                    .setTitle(documentTitle ?: "Orator")
+                    .setArtist(sectionTitle?.takeIf { it.isNotBlank() } ?: "Document")
+                    .setArtworkData(artworkData, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
                     .build()
             )
-            .setIsSeekable(true)
+            .setIsSeekable(false)
             .setIsDynamic(true)
             .build()
+}
+
+private fun NarrationState.documentId(): DocumentId? = when (this) {
+    is NarrationState.Preparing -> documentId
+    is NarrationState.Playing -> documentId
+    is NarrationState.Paused -> documentId
+    is NarrationState.Completed -> documentId
+    is NarrationState.Error -> documentId
+    NarrationState.Idle -> null
+}
+
+private fun NarrationState.activeParagraphIndex(): Int = when (this) {
+    is NarrationState.Preparing -> requestedPosition.paragraphIndex
+    is NarrationState.Playing -> safePosition.paragraphIndex
+    is NarrationState.Paused -> resumePosition.paragraphIndex
+    else -> -1
 }

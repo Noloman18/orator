@@ -35,6 +35,12 @@ dependencies {
     implementation(libs.androidx.hilt.android)
     ksp(libs.androidx.room.compiler)
     ksp(libs.androidx.hilt.compiler)
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.turbine)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(libs.androidx.room.testing)
 }
 
 ksp {

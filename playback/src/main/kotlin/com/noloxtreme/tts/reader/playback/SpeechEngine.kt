@@ -60,6 +60,12 @@ interface SpeechEngine {
     fun stop()
 
     fun shutdown()
+
+    /** Offline-capable voices only, sorted by name; empty when the engine is unavailable. */
+    suspend fun availableOfflineVoices(): List<VoiceInfo>
+
+    /** Speak a preview utterance; must not interfere with or alter saved progress. */
+    suspend fun speakPreview(text: String)
 }
 
 @Singleton
@@ -86,6 +92,9 @@ class AndroidTtsEngine @Inject constructor(
             return SpeechInitialization.LanguageUnavailable
         }
         selectOfflineVoice(tts, configuration.voiceName, locale)
+        if (tts.voice?.isNetworkConnectionRequired == true) {
+            return SpeechInitialization.LanguageUnavailable
+        }
         tts.setSpeechRate(configuration.rate.coerceIn(0.5f, 2.0f))
         tts.setPitch(configuration.pitch.coerceIn(0.5f, 2.0f))
         initialized = true
@@ -116,6 +125,31 @@ class AndroidTtsEngine @Inject constructor(
         initialized = false
         engine?.shutdown()
         engine = null
+    }
+
+    override suspend fun availableOfflineVoices(): List<VoiceInfo> {
+        val tts = ensureEngine() ?: return emptyList()
+        if (initializationStatus != TextToSpeech.SUCCESS) return emptyList()
+        return VoiceResolver.offlineVoices(
+            tts.voices.orEmpty().map { voice ->
+                VoiceInfo(
+                    name = voice.name,
+                    localeLanguageTag = voice.locale.toLanguageTag(),
+                    networkRequired = voice.isNetworkConnectionRequired
+                )
+            }
+        )
+    }
+
+    override suspend fun speakPreview(text: String) = withContext(Dispatchers.Main.immediate) {
+        val tts = engine ?: return@withContext
+        if (!initialized) return@withContext
+        tts.speak(
+            text,
+            TextToSpeech.QUEUE_FLUSH,
+            Bundle(),
+            "preview-" + System.currentTimeMillis()
+        )
     }
 
     private suspend fun ensureEngine(): TextToSpeech? = withContext(Dispatchers.Main.immediate) {
@@ -166,12 +200,20 @@ class AndroidTtsEngine @Inject constructor(
         locale: Locale
     ) {
         val voices = tts.voices.orEmpty()
-            .filter { voice -> !voice.isNetworkConnectionRequired }
-            .sortedBy { voice -> voice.name }
-        val selected = voices.firstOrNull { it.name == requestedName }
-            ?: voices.firstOrNull { it.locale == locale }
-            ?: voices.firstOrNull { it.locale.language == locale.language }
-        if (selected != null) tts.voice = selected
+        val selected = VoiceResolver.select(
+            voices = voices.map { voice ->
+                VoiceInfo(
+                    name = voice.name,
+                    localeLanguageTag = voice.locale.toLanguageTag(),
+                    networkRequired = voice.isNetworkConnectionRequired
+                )
+            },
+            requestedName = requestedName,
+            languageTag = locale.toLanguageTag()
+        )
+        if (selected != null) {
+            tts.voice = voices.firstOrNull { it.name == selected.name }
+        }
     }
 
     private fun localeFor(languageTag: String?): Locale =

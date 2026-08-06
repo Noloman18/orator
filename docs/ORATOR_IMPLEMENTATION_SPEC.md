@@ -44,7 +44,7 @@ Definitions:
 - [x] Highlight the active sentence/segment on API 24 and 25, and on any newer engine that omits timing ranges.
 - [ ] Persist progress between screen changes, process death, force-stop, normal shutdown, and device reboot.
 - [x] Restore the saved location after restart, but require the user to press Play.
-- [ ] Provide voice, speed, pitch, reader font size, line spacing, and light/dark/system appearance settings.
+- [x] Provide voice, speed, pitch, reader font size, line spacing, and light/dark/system appearance settings.
 - [ ] Work offline after a compatible system TTS voice has been installed.
 
 ### 2.2 Explicitly out of scope
@@ -272,7 +272,7 @@ Package root: com.noloxtreme.tts.reader
 - [x] Declare every dependency and version alias in gradle/libs.versions.toml.
 - [x] Use stable library releases compatible with the repository's AGP, Kotlin, compile SDK, and Compose BOM.
 - [x] Do not use alpha, beta, RC, snapshot, or dynamic dependency versions.
-- [ ] Add Navigation Compose, Hilt, KSP, Room KTX, DataStore Preferences, Paging Common to :domain, Paging Runtime to :data, Paging Compose to :app, Media3 Session/Common, AndroidX SplashScreen, Coroutines Test, and Turbine.
+- [x] Add Navigation Compose, Hilt, KSP, Room KTX, DataStore Preferences, Paging Common to :domain, Paging Runtime to :data, Paging Compose to :app, Media3 Session/Common, AndroidX SplashScreen, Coroutines Test, and Turbine.
 - [x] Add jsoup for EPUB XHTML extraction.
 - [x] Keep the existing minimum SDK at 24.
 - [x] Do not lower the compile or target SDK.
@@ -591,7 +591,7 @@ When completed is true, the position must equal the end of the final paragraph.
 
 - [x] Insert a document, its sections, paragraphs, and initial progress in one Room transaction.
 - [x] Insert paragraphs in bounded batches; never build one SQL statement containing the whole book.
-- [ ] Verify progress positions against the referenced paragraph before saving.
+- [x] Verify progress positions against the referenced paragraph before saving.
 - [x] Expose Room entities only inside :data; map them to domain models.
 - [x] Set exportSchema to true and commit every Room schema JSON under data/schemas.
 - [ ] Add a migration test for every future schema change.
@@ -1191,13 +1191,13 @@ TTS_SPEAK_FAILED retry policy:
 ## 15. Security, privacy, and backup
 
 - [x] Do not add INTERNET, MANAGE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE, or READ_MEDIA_* permissions.
-- [ ] Never log paragraph text, book titles, source URIs, TTS utterance text, or file paths in production.
+- [x] Never log paragraph text, book titles, source URIs, TTS utterance text, or file paths in production.
 - [ ] Redact document identifiers in crash breadcrumbs unless represented by an ephemeral hash.
 - [x] Reject EPUB path traversal and enforce all ZIP limits in Section 8.
-- [ ] Before recursive cleanup, resolve and verify that the target's canonical parent is exactly filesDir/documents and that its name is a valid document UUID, .import-UUID, or .delete-UUID; refuse every broader or unresolved target.
+- [x] Before recursive cleanup, resolve and verify that the target's canonical parent is exactly filesDir/documents and that its name is a valid document UUID, .import-UUID, or .delete-UUID; refuse every broader or unresolved target.
 - [x] Parse EPUB scripts as inert text or discard them; never execute them.
 - [x] Keep NarrationService unexported.
-- [ ] Every PendingIntent created by Orator must use FLAG_IMMUTABLE; combine it with FLAG_UPDATE_CURRENT when the intent is reused.
+- [x] Every PendingIntent created by Orator must use FLAG_IMMUTABLE; combine it with FLAG_UPDATE_CURRENT when the intent is reused.
 - [x] Exclude imported originals, Room document content, and progress from cloud/device-transfer backup.
 - [x] Configure res/xml/backup_rules.xml and res/xml/data_extraction_rules.xml to include only files/datastore/orator_settings.preferences_pb and exclude databases/orator.db, its journal files, and files/documents/.
 - [x] Add no analytics or crash-reporting network SDK in v1.
@@ -1235,10 +1235,10 @@ Use a release build for measurements. Record the device model, Android version, 
 - [x] Add AndroidX SplashScreen to MainActivity.
 - [x] Create the three navigation routes from Section 11.
 - [ ] Add a module dependency test or build-logic rule that prevents forbidden dependencies.
-- [ ] Add docs/adr/0001-live-device-tts.md.
-- [ ] Add docs/adr/0002-private-import-copy.md.
-- [ ] Add docs/adr/0003-character-position-progress.md.
-- [ ] Add docs/adr/0004-media3-tts-session.md.
+- [x] Add docs/adr/0001-live-device-tts.md.
+- [x] Add docs/adr/0002-private-import-copy.md.
+- [x] Add docs/adr/0003-character-position-progress.md.
+- [x] Add docs/adr/0004-media3-tts-session.md.
 - [x] Run a clean debug build.
 
 Exit criteria:
@@ -1252,7 +1252,7 @@ Exit criteria:
 - [x] Implement domain models and enforce all position invariants.
 - [x] Implement domain error types.
 - [x] Implement repository and NarrationController interfaces.
-- [ ] Implement all use-case shells from Section 6.5.
+- [x] Implement all use-case shells from Section 6.5.
 - [x] Create Room entities and DAOs exactly matching Section 7.
 - [x] Implement Room-to-domain mappers.
 - [x] Implement Room repository transactions.
@@ -1261,15 +1261,15 @@ Exit criteria:
 - [x] Implement settings validation and clamping.
 - [x] Add unit tests for offset calculation across paragraphs.
 - [x] Add unit tests rejecting invalid DocumentPosition and SpokenRange values.
-- [ ] Add DAO tests for cascade delete and unique SHA-256.
-- [ ] Add repository tests for atomic document insertion.
-- [ ] Add repository tests for progress validation.
+- [x] Add DAO tests for cascade delete and unique SHA-256.
+- [x] Add repository tests for atomic document insertion.
+- [x] Add repository tests for progress validation.
 
 Exit criteria:
 
 - [x] Domain tests run without an Android runtime.
-- [ ] Room tests prove document, section, paragraph, and progress insertion is atomic.
-- [ ] Deleting a document cascades through all Room child rows.
+- [x] Room tests prove document, section, paragraph, and progress insertion is atomic.
+- [x] Deleting a document cascades through all Room child rows.
 
 ## 18. Phase 2 — Import and Library
 
@@ -1288,8 +1288,8 @@ Exit criteria:
 - [x] Implement Continue reading.
 - [x] Implement deterministic title placeholders.
 - [x] Implement delete confirmation and active-playback stop coordination.
-- [ ] Add parser fixtures for UTF-8 TXT, UTF-16 TXT, EPUB 2, EPUB 3, malformed EPUB, encrypted EPUB, traversal ZIP, oversized ZIP, and empty content.
-- [ ] Add parser golden tests proving spine and paragraph order.
+- [x] Add parser fixtures for UTF-8 TXT, UTF-16 TXT, EPUB 2, EPUB 3, malformed EPUB, encrypted EPUB, traversal ZIP, oversized ZIP, and empty content.
+- [x] Add parser golden tests proving spine and paragraph order.
 - [ ] Add an instrumentation test importing through a fake ContentProvider.
 
 Exit criteria:
@@ -1311,24 +1311,24 @@ Exit criteria:
 - [x] Implement voice/rate/pitch reconfiguration and resume.
 - [x] Implement TtsPlayerAdapter as the SimpleBasePlayer specified in Section 9.2.
 - [x] Implement NarrationService and MediaSession.
-- [ ] Implement a Media3 MediaNotification.Provider using the Orator notification icon, metadata, and controls from Section 9.2.
+- [x] Implement a Media3 MediaNotification.Provider using the Orator notification icon, metadata, and controls from Section 9.2.
 - [x] Implement PlaybackStateStore as a read-only StateFlow to consumers.
 - [x] Implement audio focus rules.
-- [ ] Implement AUDIO_BECOMING_NOISY handling.
-- [ ] Implement playing-only wake-lock ownership.
+- [x] Implement AUDIO_BECOMING_NOISY handling.
+- [x] Implement playing-only wake-lock ownership.
 - [x] Implement API 24–25 segment highlighting fallback.
 - [x] Implement API 26+ spoken range updates.
 - [x] Implement TTS installation/configuration recovery actions.
-- [ ] Add unit tests using a fake SpeechEngine and fake clock.
-- [ ] Add state-machine tests for every command in every valid state.
-- [ ] Add tests proving stale session callbacks are ignored.
-- [ ] Add tests proving pause/restart never advances beyond the active range.
+- [x] Add unit tests using a fake SpeechEngine and fake clock.
+- [x] Add state-machine tests for every command in every valid state.
+- [x] Add tests proving stale session callbacks are ignored.
+- [x] Add tests proving pause/restart never advances beyond the active range.
 
 Exit criteria:
 
 - [ ] AC-007 through AC-015 pass.
 - [ ] No wake lock remains held in Idle, Paused, Completed, or Error.
-- [ ] A failed TTS segment is retried once and then surfaces a recoverable error.
+- [x] A failed TTS segment is retried once and then surfaces a recoverable error.
 
 ## 20. Phase 4 — Reader and synchronized text
 
@@ -1363,7 +1363,7 @@ Exit criteria:
 - [x] Implement light, dark, and system themes.
 - [x] Keep dynamic color disabled.
 - [x] Implement the Settings screen for speech rate, pitch, reader size, spacing, follow mode, and theme.
-- [ ] Implement voice preview without changing book progress.
+- [x] Implement voice preview without changing book progress.
 - [ ] Generate and integrate all required assets in Section 13.2.
 - [ ] Replace generic launcher artwork.
 - [ ] Implement all localized error mappings.
@@ -1374,9 +1374,9 @@ Exit criteria:
 - [ ] Run static analysis, lint, unit tests, and instrumentation tests.
 - [ ] Inspect the merged release manifest for forbidden permissions.
 - [ ] Verify release code logs no document content.
-- [ ] Add docs/SUPPORTED_FORMATS.md.
-- [ ] Add docs/PRIVACY_AND_BACKUP.md.
-- [ ] Add docs/TEST_MATRIX.md recording tested API levels, devices, and TTS engines.
+- [x] Add docs/SUPPORTED_FORMATS.md.
+- [x] Add docs/PRIVACY_AND_BACKUP.md.
+- [x] Add docs/TEST_MATRIX.md recording tested API levels, devices, and TTS engines.
 
 Exit criteria:
 

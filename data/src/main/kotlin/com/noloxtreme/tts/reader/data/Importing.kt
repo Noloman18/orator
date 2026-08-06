@@ -33,6 +33,8 @@ import kotlinx.coroutines.withContext
 
 private const val MAX_SOURCE_BYTES = 100L * 1024L * 1024L
 private const val PARAGRAPH_BATCH_SIZE = 250
+private val TRANSIENT_DIRECTORY_NAME =
+    Regex("""\A(\.import-|\.delete-)[0-9a-fA-F-]{36}\z""")
 
 @Singleton
 class SafDocumentImporter @Inject constructor(
@@ -89,7 +91,7 @@ class SafDocumentImporter @Inject constructor(
                         DocumentEntity(
                             id = documentId.value,
                             title = metadata.title,
-                            originalFileName = source.displayName,
+                            originalFileName = MetadataNormalizer.normalizeFileName(source.displayName),
                             mimeType = metadata.mimeType,
                             sourceExtension = extension,
                             privateSourcePath = "documents/" + documentId.value + "/source." + extension,
@@ -102,17 +104,37 @@ class SafDocumentImporter @Inject constructor(
                         )
                     )
                     val paragraphs = ArrayList<ParagraphEntity>(PARAGRAPH_BATCH_SIZE)
+                    val sections = ArrayList<SectionEntity>()
                     var paragraphIndex = 0
-                    val sectionIndex = 0
                     var absoluteOffset = 0L
                     var lastParagraph: ParagraphEntity? = null
-                    parser.forEachParagraph(finalizedSource) { rawParagraph ->
-                        val text = normalizeParagraph(rawParagraph)
-                        if (text.isBlank()) return@forEachParagraph
+                    var openSectionIndex = -1
+                    var openSectionTitle: String? = null
+                    var openSectionFirstParagraph = 0
+                    var openSectionStart = 0L
+                    parser.forEachBlock(finalizedSource) { block ->
+                        val text = normalizeParagraph(block.text)
+                        if (text.isBlank()) return@forEachBlock
+                        if (block.sectionIndex != openSectionIndex) {
+                            closeSection(
+                                sections,
+                                documentId,
+                                openSectionIndex,
+                                openSectionTitle,
+                                openSectionFirstParagraph,
+                                paragraphIndex - 1,
+                                openSectionStart,
+                                lastParagraph?.absoluteEnd ?: 0L
+                            )
+                            openSectionIndex = block.sectionIndex
+                            openSectionTitle = block.sectionTitle
+                            openSectionFirstParagraph = paragraphIndex
+                            openSectionStart = absoluteOffset
+                        }
                         val paragraph = ParagraphEntity(
                             documentId = documentId.value,
                             paragraphIndex = paragraphIndex,
-                            sectionIndex = sectionIndex,
+                            sectionIndex = block.sectionIndex,
                             text = text,
                             absoluteStart = absoluteOffset,
                             absoluteEnd = absoluteOffset + text.length
@@ -126,30 +148,28 @@ class SafDocumentImporter @Inject constructor(
                             paragraphs.clear()
                         }
                     }
+                    closeSection(
+                        sections,
+                        documentId,
+                        openSectionIndex,
+                        openSectionTitle,
+                        openSectionFirstParagraph,
+                        paragraphIndex - 1,
+                        openSectionStart,
+                        lastParagraph?.absoluteEnd ?: 0L
+                    )
                     if (paragraphs.isNotEmpty()) {
                         database.contentDao().insertBatch(paragraphs)
                     }
                     val finalParagraph = lastParagraph
                         ?: throw ImportException(ImportError.NO_READABLE_TEXT)
-                    database.sectionDao().insertAll(
-                        listOf(
-                            SectionEntity(
-                                documentId = documentId.value,
-                                sectionIndex = sectionIndex,
-                                title = metadata.title,
-                                firstParagraphIndex = 0,
-                                lastParagraphIndex = finalParagraph.paragraphIndex,
-                                absoluteStart = 0L,
-                                absoluteEnd = finalParagraph.absoluteEnd
-                            )
-                        )
-                    )
+                    database.sectionDao().insertAll(sections)
                     database.documentDao().finalizeDocument(
                         id = documentId.value,
                         title = metadata.title,
                         languageTag = metadata.languageTag,
                         totalCharacterCount = finalParagraph.absoluteEnd,
-                        sectionCount = 1
+                        sectionCount = sections.size
                     )
                     database.progressDao().upsert(
                         ReadingProgressEntity(
@@ -232,9 +252,14 @@ class SafDocumentImporter @Inject constructor(
     }
 
     private fun cleanupTransientDirectories(root: File) {
-        root.listFiles()?.filter {
-            it.name.startsWith(".import-") || it.name.startsWith(".delete-")
-        }?.forEach(File::deleteRecursively)
+        val canonicalRoot = root.canonicalFile
+        canonicalRoot.listFiles()?.forEach { entry ->
+            val canonicalEntry = entry.canonicalFile
+            if (canonicalEntry.parentFile != canonicalRoot) return@forEach
+            if (TRANSIENT_DIRECTORY_NAME.matches(canonicalEntry.name)) {
+                canonicalEntry.deleteRecursively()
+            }
+        }
     }
 
     private fun cleanupImport(temporary: File, finalized: File?) {
@@ -251,23 +276,28 @@ internal data class ParsedMetadata(
     val languageTag: String?
 )
 
+internal data class ParsedBlock(
+    val text: String,
+    val sectionIndex: Int,
+    val sectionTitle: String?
+)
+
 internal interface BookParser {
     fun readMetadata(file: File, displayName: String): ParsedMetadata
-    suspend fun forEachParagraph(file: File, consumer: suspend (String) -> Unit)
+    suspend fun forEachBlock(file: File, consumer: suspend (ParsedBlock) -> Unit)
 }
 
-private class TxtParser : BookParser {
+internal class TxtParser : BookParser {
     override fun readMetadata(file: File, displayName: String): ParsedMetadata =
         ParsedMetadata(
-            title = displayName.substringBeforeLast('.', displayName)
-                .trim()
-                .ifBlank { "Untitled book" }
-                .take(200),
+            title = MetadataNormalizer.normalizeTitle(
+                displayName.substringBeforeLast('.', displayName)
+            ),
             mimeType = "text/plain",
             languageTag = null
         )
 
-    override suspend fun forEachParagraph(file: File, consumer: suspend (String) -> Unit) {
+    override suspend fun forEachBlock(file: File, consumer: suspend (ParsedBlock) -> Unit) {
         val charset = detectCharset(file)
         val decoder = charset.newDecoder()
             .onMalformedInput(CodingErrorAction.REPORT)
@@ -275,11 +305,11 @@ private class TxtParser : BookParser {
         InputStreamReader(file.inputStream().buffered(), decoder).useLines { lines ->
             val paragraph = StringBuilder()
             for (original in lines) {
-                val line = original.removePrefix("﻿").trim()
+                val line = original.removePrefix("\uFEFF").trim()
                     .replace(Regex("""\s+"""), " ")
                 if (line.isBlank()) {
                     if (paragraph.isNotEmpty()) {
-                        consumer(paragraph.toString())
+                        consumer(ParsedBlock(paragraph.toString(), 0, null))
                         paragraph.clear()
                     }
                 } else {
@@ -287,7 +317,9 @@ private class TxtParser : BookParser {
                     paragraph.append(line)
                 }
             }
-            if (paragraph.isNotEmpty()) consumer(paragraph.toString())
+            if (paragraph.isNotEmpty()) {
+                consumer(ParsedBlock(paragraph.toString(), 0, null))
+            }
         }
     }
 
@@ -322,6 +354,28 @@ internal class ImportException(val error: ImportError) : IOException()
 
 private fun normalizeParagraph(value: String): String =
     value.trim().replace(Regex("""\s+"""), " ")
+
+private fun closeSection(
+    sections: MutableList<SectionEntity>,
+    documentId: DocumentId,
+    sectionIndex: Int,
+    title: String?,
+    firstParagraphIndex: Int,
+    lastParagraphIndex: Int,
+    absoluteStart: Long,
+    absoluteEnd: Long
+) {
+    if (sectionIndex < 0) return
+    sections += SectionEntity(
+        documentId = documentId.value,
+        sectionIndex = sectionIndex,
+        title = title,
+        firstParagraphIndex = firstParagraphIndex,
+        lastParagraphIndex = lastParagraphIndex,
+        absoluteStart = absoluteStart,
+        absoluteEnd = absoluteEnd
+    )
+}
 
 private fun sha256(file: File): String {
     val digest = MessageDigest.getInstance("SHA-256")

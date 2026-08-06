@@ -31,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.outlined.MoreVert
@@ -545,10 +546,66 @@ private fun SettingsScreen(
             }
             item {
                 SettingSectionTitle("Voice")
-                Text("Speech rate: " + settings.speechRate.toString().take(4) + "×", style = MaterialTheme.typography.titleMedium)
+                val voices = viewModel.voices.collectAsState().value
+                if (voices.isEmpty()) {
+                    Text(
+                        "No offline voices were found. Install a voice through the system settings.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    val grouped = voices.groupBy { voice ->
+                        java.util.Locale.forLanguageTag(voice.localeLanguageTag)
+                            .displayLanguage.ifBlank { voice.localeLanguageTag }
+                    }
+                    grouped.forEach { (language, groupVoices) ->
+                        Text(
+                            language,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(top = 6.dp, bottom = 4.dp)
+                        )
+                        groupVoices.forEach { voice ->
+                            val selected = settings.voiceName == voice.name
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(MaterialTheme.shapes.medium)
+                                    .clickable {
+                                        viewModel.setVoice(if (selected) null else voice.name)
+                                    }
+                                    .padding(vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    voice.name,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    modifier = Modifier.weight(1f),
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                                )
+                                if (selected) {
+                                    Icon(
+                                        Icons.Outlined.Check,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text("Speech rate: " + settings.speechRate.toString().take(4) + "\u00D7", style = MaterialTheme.typography.titleMedium)
                 Slider(value = settings.speechRate, onValueChange = viewModel::setRate, valueRange = 0.5f..2f)
-                Text("Pitch: " + settings.speechPitch.toString().take(4) + "×", style = MaterialTheme.typography.titleMedium)
-                Slider(value = settings.speechPitch, onValueChange = viewModel::setPitch, valueRange = 0.5f..2f)
+                Text("Pitch: " + settings.speechPitch.toString().take(4) + "\u00D7", style = MaterialTheme.typography.titleMedium)
+                Slider(value = settings.speechPitch, onValueChange = viewModel::setPitch, valueRange = 0.5f..1.5f)
+                Spacer(Modifier.height(6.dp))
+                OutlinedButton(onClick = viewModel::previewVoice) {
+                    Icon(Icons.Outlined.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Preview voice")
+                }
+                Spacer(Modifier.height(8.dp))
                 Text("Orator uses an installed offline Android voice. Network voices are not selected.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }

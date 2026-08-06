@@ -1,0 +1,12 @@
+package com.noloxtreme.tts.reader.domain.usecase
+
+import com.noloxtreme.tts.reader.domain.NarrationCommand
+import com.noloxtreme.tts.reader.domain.NarrationController
+
+class PauseNarration @javax.inject.Inject constructor(
+    private val narrationController: NarrationController
+) {
+    fun execute() {
+        narrationController.dispatch(NarrationCommand.Pause())
+    }
+}
