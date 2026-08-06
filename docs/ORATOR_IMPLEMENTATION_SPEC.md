@@ -1383,7 +1383,7 @@ Exit criteria:
 - [ ] AC-022 through AC-027 pass.
 - [ ] All required graphics render correctly in light and dark themes.
 - [x] The release manifest contains no INTERNET or broad-storage permission.
-- [x] ./gradlew test lint assembleRelease succeeds.
+- [ ] ./gradlew test lint assembleRelease succeeds.
 
 ## 22. Acceptance scenarios
 
