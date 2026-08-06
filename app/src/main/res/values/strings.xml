@@ -6,7 +6,7 @@
     <string name="add_book">Add book</string>
     <string name="add_first_book">Add your first book</string>
     <string name="empty_library_title">Your library is empty</string>
-    <string name="empty_library_body">Add a TXT or EPUB book. Books and reading progress stay on this device.</string>
+    <string name="empty_library_body">Add a TXT, Markdown, EPUB, or PDF book. Books and reading progress stay on this device.</string>
     <string name="book_imported">Book imported</string>
     <string name="duplicate_book">That book is already in your library</string>
     <string name="continue_reading">Continue reading</string>
@@ -58,13 +58,15 @@
     <string name="line_height_compact">Compact</string>
     <string name="line_height_comfortable">Comfortable</string>
     <string name="line_height_spacious">Spacious</string>
-    <string name="error_unsupported_format">Choose a TXT or EPUB file</string>
+    <string name="error_unsupported_format">Choose a TXT, Markdown, EPUB, or PDF file</string>
     <string name="error_file_too_large">The file is larger than 100 MB</string>
     <string name="error_source_unreadable">Orator could not read that file</string>
     <string name="error_unsupported_encoding">The text encoding is not supported</string>
     <string name="error_malformed_document">The document is malformed</string>
     <string name="error_epub_encrypted">Encrypted EPUB files are not supported</string>
     <string name="error_epub_limit">The EPUB exceeds the safety limits</string>
+    <string name="error_pdf_encrypted">Password-protected or encrypted PDF files are not supported</string>
+    <string name="error_pdf_limit">The PDF exceeds the page or extracted-text safety limits</string>
     <string name="error_no_readable_text">No readable text was found</string>
     <string name="error_storage_full">Not enough storage to import the book</string>
     <string name="error_database">Could not save the imported book</string>

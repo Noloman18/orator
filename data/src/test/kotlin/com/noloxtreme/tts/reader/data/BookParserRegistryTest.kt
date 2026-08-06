@@ -8,7 +8,7 @@ import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class BookParserRegistryTest {
-    private val registry = BookParserRegistry(setOf(TxtParser(), EpubParser()))
+    private val registry = BookParserRegistry(setOf(TxtParser(), MarkdownParser(), EpubParser()))
 
     @Test
     fun resolvesTxtByExtension() {
@@ -30,5 +30,25 @@ class BookParserRegistryTest {
         }
 
         assertEquals(ImportError.UNSUPPORTED_FORMAT, error.error)
+    }
+
+    @Test
+    fun resolvesMarkdownBeforeGenericTextFallback() {
+        val parser = registry.resolve(
+            ImportSource("content://book", "novel.md", "application/octet-stream", null),
+            File.createTempFile("orator", ".md")
+        )
+
+        assertEquals("md", parser.extension)
+    }
+
+    @Test
+    fun resolvesMarkdownWhenProviderReportsPlainText() {
+        val parser = registry.resolve(
+            ImportSource("content://book", "novel.md", "text/plain", null),
+            File.createTempFile("orator", ".md")
+        )
+
+        assertEquals("md", parser.extension)
     }
 }

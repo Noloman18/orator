@@ -63,6 +63,14 @@ object DataProvidersModule {
     fun provideEpubParser(): BookParser = EpubParser()
 
     @Provides
+    @IntoSet
+    fun provideMarkdownParser(): BookParser = MarkdownParser()
+
+    @Provides
+    @IntoSet
+    fun providePdfParser(@ApplicationContext context: Context): BookParser = PdfParser(context)
+
+    @Provides
     @Singleton
     fun provideBookParserRegistry(
         parsers: Set<@JvmSuppressWildcards BookParser>

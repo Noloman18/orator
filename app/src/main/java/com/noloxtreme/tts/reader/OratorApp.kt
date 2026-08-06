@@ -116,7 +116,13 @@ import kotlinx.coroutines.launch
 private const val LIBRARY_ROUTE = "library"
 private const val SETTINGS_ROUTE = "settings"
 private const val READER_ROUTE = "reader/{documentId}"
-private val SUPPORTED_PICKER_MIME_TYPES = arrayOf("text/plain", "application/epub+zip")
+private val SUPPORTED_PICKER_MIME_TYPES = arrayOf(
+    "text/plain",
+    "text/markdown",
+    "text/x-markdown",
+    "application/epub+zip",
+    "application/pdf"
+)
 
 @Composable
 fun OratorApp(appViewModel: AppViewModel = hiltViewModel()) {
@@ -922,6 +928,8 @@ private fun importErrorMessage(resources: android.content.res.Resources, error: 
     ImportError.MALFORMED_DOCUMENT -> resources.getString(R.string.error_malformed_document)
     ImportError.EPUB_ENCRYPTED -> resources.getString(R.string.error_epub_encrypted)
     ImportError.EPUB_LIMIT_EXCEEDED -> resources.getString(R.string.error_epub_limit)
+    ImportError.PDF_ENCRYPTED -> resources.getString(R.string.error_pdf_encrypted)
+    ImportError.PDF_LIMIT_EXCEEDED -> resources.getString(R.string.error_pdf_limit)
     ImportError.NO_READABLE_TEXT -> resources.getString(R.string.error_no_readable_text)
     ImportError.STORAGE_FULL -> resources.getString(R.string.error_storage_full)
     ImportError.DATABASE_ERROR -> resources.getString(R.string.error_database)

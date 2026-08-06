@@ -16,6 +16,10 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
 }
 
 kotlin {
@@ -32,6 +36,7 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.coroutines.android)
     implementation(libs.jsoup)
+    implementation(libs.pdfbox.android)
     implementation(libs.androidx.hilt.android)
     ksp(libs.androidx.room.compiler)
     ksp(libs.androidx.hilt.compiler)

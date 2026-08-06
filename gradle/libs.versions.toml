@@ -18,6 +18,7 @@ coroutines = "1.10.2"
 hilt = "2.60.1"
 ksp = "2.2.10-2.0.2"
 jsoup = "1.18.3"
+pdfboxAndroid = "2.0.27.0"
 hiltNavigationCompose = "1.2.0"
 turbine = "1.2.0"
 robolectric = "4.16.1"
@@ -56,6 +57,7 @@ androidx-hilt-compiler = { group = "com.google.dagger", name = "hilt-compiler", 
 androidx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 androidx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }
 jsoup = { group = "org.jsoup", name = "jsoup", version.ref = "jsoup" }
+pdfbox-android = { group = "com.tom-roush", name = "pdfbox-android", version.ref = "pdfboxAndroid" }
 javax-inject = { group = "javax.inject", name = "javax.inject", version.ref = "javaxInject" }
 kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
 turbine = { group = "app.cash.turbine", name = "turbine", version.ref = "turbine" }

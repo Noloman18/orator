@@ -262,7 +262,15 @@ data class ParsedBlock(
 
 interface BookParser {
     val extension: String
-    fun accepts(source: ImportSource): Boolean
+    val supportedExtensions: Set<String> get() = setOf(extension)
+    val supportedMimeTypes: Set<String>
+    val acceptsGenericBinary: Boolean get() = false
+    fun accepts(source: ImportSource): Boolean {
+        val sourceExtension = source.displayName.substringAfterLast('.', "")
+            .lowercase(Locale.ROOT)
+        return supportedExtensions.any { sourceExtension.equals(it, true) } ||
+            supportedMimeTypes.any { source.mimeType.equals(it, true) }
+    }
     fun validate(file: File) = Unit
     fun readMetadata(file: File, displayName: String): ParsedMetadata
     suspend fun forEachBlock(file: File, consumer: suspend (ParsedBlock) -> Unit)
@@ -272,7 +280,32 @@ class BookParserRegistry(
     private val parsers: Set<BookParser>
 ) {
     fun resolve(source: ImportSource, file: File): BookParser {
-        val matches = parsers.filter { it.accepts(source) }
+        val sourceExtension = source.displayName.substringAfterLast('.', "")
+            .lowercase(Locale.ROOT)
+        val extensionMatches = parsers.filter { parser ->
+            parser.supportedExtensions.any { sourceExtension.equals(it, true) }
+        }
+        if (extensionMatches.size > 1) throw ImportException(ImportError.UNSUPPORTED_FORMAT)
+        if (extensionMatches.size == 1) {
+            val selected = extensionMatches.single()
+            val incompatibleMimeClaim = parsers.any { parser ->
+                parser !== selected &&
+                    parser.supportedMimeTypes.any { source.mimeType.equals(it, true) }
+            }
+            val providerMimeIsWeak = source.mimeType.equals("text/plain", true) ||
+                source.mimeType.equals("application/octet-stream", true)
+            if (incompatibleMimeClaim && !providerMimeIsWeak) {
+                throw ImportException(ImportError.UNSUPPORTED_FORMAT)
+            }
+            return selected.also { it.validate(file) }
+        }
+
+        var matches = parsers.filter { parser ->
+            parser.supportedMimeTypes.any { source.mimeType.equals(it, true) }
+        }
+        if (matches.isEmpty() && source.mimeType.equals("application/octet-stream", true)) {
+            matches = parsers.filter { it.acceptsGenericBinary }
+        }
         if (matches.size != 1) throw ImportException(ImportError.UNSUPPORTED_FORMAT)
         return matches.single().also { it.validate(file) }
     }
@@ -280,13 +313,8 @@ class BookParserRegistry(
 
 internal class TxtParser : BookParser {
     override val extension: String = "txt"
-
-    override fun accepts(source: ImportSource): Boolean {
-        val name = source.displayName.lowercase(Locale.ROOT)
-        return source.mimeType.equals("text/plain", true) ||
-            name.endsWith(".txt") ||
-            (source.mimeType.equals("application/octet-stream", true) && !name.endsWith(".epub"))
-    }
+    override val supportedMimeTypes: Set<String> = setOf("text/plain")
+    override val acceptsGenericBinary: Boolean = true
 
     override fun readMetadata(file: File, displayName: String): ParsedMetadata =
         ParsedMetadata(
@@ -298,11 +326,7 @@ internal class TxtParser : BookParser {
         )
 
     override suspend fun forEachBlock(file: File, consumer: suspend (ParsedBlock) -> Unit) {
-        val charset = detectCharset(file)
-        val decoder = charset.newDecoder()
-            .onMalformedInput(CodingErrorAction.REPORT)
-            .onUnmappableCharacter(CodingErrorAction.REPORT)
-        InputStreamReader(file.inputStream().buffered(), decoder).useLines { lines ->
+        decodedTextReader(file).useLines { lines ->
             val paragraph = StringBuilder()
             for (original in lines) {
                 val line = original.removePrefix("\uFEFF").trim()
@@ -323,30 +347,43 @@ internal class TxtParser : BookParser {
         }
     }
 
-    private fun detectCharset(file: File): Charset {
-        val prefix = file.inputStream().use { input ->
-            ByteArray(3).also { buffer ->
-                var offset = 0
-                while (offset < buffer.size) {
-                    val read = input.read(buffer, offset, buffer.size - offset)
-                    if (read < 0) break
-                    offset += read
-                }
+}
+
+internal fun decodedTextReader(file: File): InputStreamReader {
+    val encoding = detectTextEncoding(file)
+    val decoder = encoding.charset.newDecoder()
+        .onMalformedInput(CodingErrorAction.REPORT)
+        .onUnmappableCharacter(CodingErrorAction.REPORT)
+    val input = file.inputStream().buffered()
+    repeat(encoding.bomLength) { input.read() }
+    return InputStreamReader(input, decoder)
+}
+
+private data class TextEncoding(val charset: Charset, val bomLength: Int)
+
+private fun detectTextEncoding(file: File): TextEncoding {
+    val prefix = file.inputStream().use { input ->
+        ByteArray(3).also { buffer ->
+            var offset = 0
+            while (offset < buffer.size) {
+                val read = input.read(buffer, offset, buffer.size - offset)
+                if (read < 0) break
+                offset += read
             }
         }
-        return when {
-            prefix.size >= 3 &&
-                prefix[0] == 0xEF.toByte() &&
-                prefix[1] == 0xBB.toByte() &&
-                prefix[2] == 0xBF.toByte() -> Charsets.UTF_8
-            prefix.size >= 2 &&
-                prefix[0] == 0xFF.toByte() &&
-                prefix[1] == 0xFE.toByte() -> Charsets.UTF_16LE
-            prefix.size >= 2 &&
-                prefix[0] == 0xFE.toByte() &&
-                prefix[1] == 0xFF.toByte() -> Charsets.UTF_16BE
-            else -> Charsets.UTF_8
-        }
+    }
+    return when {
+        prefix.size >= 3 &&
+            prefix[0] == 0xEF.toByte() &&
+            prefix[1] == 0xBB.toByte() &&
+            prefix[2] == 0xBF.toByte() -> TextEncoding(Charsets.UTF_8, 3)
+        prefix.size >= 2 &&
+            prefix[0] == 0xFF.toByte() &&
+            prefix[1] == 0xFE.toByte() -> TextEncoding(Charsets.UTF_16LE, 2)
+        prefix.size >= 2 &&
+            prefix[0] == 0xFE.toByte() &&
+            prefix[1] == 0xFF.toByte() -> TextEncoding(Charsets.UTF_16BE, 2)
+        else -> TextEncoding(Charsets.UTF_8, 0)
     }
 }
 

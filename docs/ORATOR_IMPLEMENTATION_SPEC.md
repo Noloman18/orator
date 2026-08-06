@@ -6,9 +6,9 @@ Application ID: com.noloxtreme.tts.reader
 Minimum Android version: API 24  
 Current UI technology: Kotlin and Jetpack Compose
 
-Implementation tracking note, updated 2026-08-06: checked items below mean the current repository contains the implementation or local verification evidence. Items that require physical-device playback, release verification, generated artwork, or formal acceptance recording remain unchecked until that work is actually done. The 2026-08-06 review follow-up added explicit Library/Reader loading and missing-document states, character progress, user-controlled follow mode, TTS recovery actions, scoped deletion stop coordination, duplicate-import navigation, and a DI-backed parser registry; Compose/device acceptance tests remain pending.
+Implementation tracking note, updated 2026-08-06: checked items below mean the current repository contains the implementation or local verification evidence. Items that require physical-device playback, release verification, generated artwork, or formal acceptance recording remain unchecked until that work is actually done. The 2026-08-06 review follow-up added explicit Library/Reader loading and missing-document states, character progress, user-controlled follow mode, TTS recovery actions, scoped deletion stop coordination, duplicate-import navigation, and a DI-backed parser registry. ADR 0005 subsequently added Markdown and local, text-extractable PDF import; Compose/device acceptance tests remain pending.
 
-This document is the source of truth for Orator v1. Implement the decisions below as written. Do not substitute a cloud speech service, generate permanent audio files, add unsupported document formats, or change the persistence model without recording and approving a new architecture decision.
+This document is the source of truth for Orator v1. Implement the decisions below as written. Do not substitute a cloud speech service, generate permanent audio files, add formats beyond TXT, Markdown, EPUB, and PDF, or change the persistence model without recording and approving a new architecture decision.
 
 ## 1. Completion rules
 
@@ -33,7 +33,9 @@ Definitions:
 ### 2.1 Required
 
 - [x] Import plain-text files through Android's system document picker.
+- [x] Import Markdown `.md` and `.markdown` files through Android's system document picker.
 - [x] Import non-DRM EPUB 2 and EPUB 3 files through Android's system document picker.
+- [x] Import unencrypted PDFs that contain extractable text through Android's system document picker.
 - [x] Copy every successfully selected source into app-private storage.
 - [x] Display all imported books in a local Library screen.
 - [x] Display normalized book text in a Reader screen.
@@ -51,9 +53,10 @@ Definitions:
 
 Do not implement these in v1:
 
-- PDF, DOCX, HTML, RTF, MOBI, Kindle, audiobook, or image imports.
-- OCR for scanned pages.
-- DRM removal or encrypted EPUB reading.
+- DOCX, standalone HTML, RTF, MOBI, Kindle, audiobook, or image imports.
+- OCR for scanned pages or image-only PDFs.
+- PDF page rendering, forms, annotations, JavaScript, embedded media, or image narration.
+- DRM removal, encrypted EPUB reading, or encrypted/password-protected PDF reading.
 - Cloud TTS or network-based voices.
 - MP3, WAV, or other permanent audio generation.
 - Accounts, cloud sync, cross-device progress, or remote storage.
@@ -113,7 +116,9 @@ flowchart TB
         Source["SAF document source"]
         Registry["Parser registry"]
         TXT["TXT parser"]
+        Markdown["Markdown parser"]
         EPUB["EPUB parser"]
+        PDF["PDF text parser"]
         Database["Room database"]
         Preferences["Preferences DataStore"]
         PrivateFiles["App-private original files"]
@@ -138,9 +143,13 @@ flowchart TB
     Picker --> Source
     Source --> Registry
     Registry --> TXT
+    Registry --> Markdown
     Registry --> EPUB
+    Registry --> PDF
     TXT --> Database
+    Markdown --> Database
     EPUB --> Database
+    PDF --> Database
     Source --> PrivateFiles
     Database -.implements.-> Ports
     Preferences -.implements.-> Ports
@@ -211,7 +220,7 @@ Contains:
 - Preferences DataStore implementation.
 - SAF source adapter and app-private file manager.
 - SHA-256 calculation.
-- TXT and EPUB parsers.
+- TXT, Markdown, EPUB, and PDF parsers.
 - Import transaction coordinator.
 
 Allowed project dependency: :domain. Forbidden project dependencies: :app, :playback, and :designsystem.
@@ -274,6 +283,7 @@ Package root: com.noloxtreme.tts.reader
 - [x] Do not use alpha, beta, RC, snapshot, or dynamic dependency versions.
 - [x] Add Navigation Compose, Hilt, KSP, Room KTX, DataStore Preferences, Paging Common to :domain, Paging Runtime to :data, Paging Compose to :app, Media3 Session/Common, AndroidX SplashScreen, Coroutines Test, and Turbine.
 - [x] Add jsoup for EPUB XHTML extraction.
+- [x] Add PDFBox-Android 2.0.27.0 for local PDF text extraction and initialize its resource loader with the application context.
 - [x] Keep the existing minimum SDK at 24.
 - [x] Do not lower the compile or target SDK.
 
@@ -360,7 +370,7 @@ Required fields:
 
 opaqueHandle contains the selected content URI serialized as a string. Only :data may convert it back to android.net.Uri. Do not persist opaqueHandle after import completes or fails.
 
-Implement ImportState as a sealed type with the states in Section 8.6.
+Implement ImportState as a sealed type with the states in Section 8.8.
 
     enum class ThemePreference { SYSTEM, LIGHT, DARK }
 
@@ -604,16 +614,23 @@ When completed is true, the position must equal the end of the final paragraph.
 Use ActivityResultContracts.OpenDocument. Provide these MIME types:
 
 - text/plain
+- text/markdown
+- text/x-markdown
 - application/epub+zip
+- application/pdf
 
 Do not use ACTION_GET_CONTENT, MANAGE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE, or READ_MEDIA_*.
 
 Format resolution:
 
-- Treat MIME application/epub+zip or filename extension .epub as an EPUB claim. Require a valid ZIP header and the EPUB mimetype entry.
-- Treat MIME text/plain or filename extension .txt as a TXT claim. Require successful decoding under Section 8.4.
-- Accept application/octet-stream only when .txt or .epub identifies the format and the corresponding validation succeeds.
-- If MIME and extension claim different supported formats, return UNSUPPORTED_FORMAT.
+- Each parser declares its supported MIME types and case-insensitive filename extensions through `BookParser`; the registry must not contain a format-specific `when` statement.
+- TXT claims `text/plain` and `.txt`; require successful decoding under Section 8.4.
+- Markdown claims `text/markdown`, `text/x-markdown`, `.md`, and `.markdown`; require successful decoding under Section 8.6.
+- EPUB claims `application/epub+zip` and `.epub`; require the ZIP and EPUB validation in Section 8.5.
+- PDF claims `application/pdf` and `.pdf`; require the `%PDF-` signature and PDF validation in Section 8.7.
+- Treat provider MIME `text/plain` and `application/octet-stream` as weak evidence when a recognized supported filename extension is present. In that case select the extension's parser and run its format validation.
+- If a recognized extension and a different strong supported MIME claim different formats, return `UNSUPPORTED_FORMAT` rather than guessing.
+- When the filename has no recognized extension, resolve by one unambiguous supported MIME claim. Retain the existing TXT-only generic-binary fallback for extensionless `application/octet-stream` sources, which must still decode successfully.
 - Ignore filename case when checking extensions.
 
 The app must copy the source immediately. Keep the URI only inside the in-memory ImportSource during import, close its stream on every outcome, and discard the URI when import completes or fails. Do not call takePersistableUriPermission and do not store the URI in Room or DataStore.
@@ -624,8 +641,11 @@ The app must copy the source immediately. Keep the URI only inside the in-memory
 - Maximum EPUB ZIP entry count: 10,000.
 - Maximum total uncompressed EPUB content: 250 MiB.
 - Maximum single EPUB ZIP entry: 25 MiB.
+- Maximum PDF page count: 10,000.
+- Maximum extracted PDF text: 25,000,000 UTF-16 code units.
 - Reject ZIP entries whose normalized destination escapes the import workspace.
 - Reject EPUB files containing encrypted reading-order content or DRM declarations.
+- Reject encrypted/password-protected PDFs; do not prompt for, store, or attempt passwords.
 - Reject a parsed document containing no non-whitespace paragraph text.
 
 Use 1 MiB = 1,048,576 bytes.
@@ -643,8 +663,8 @@ Use 1 MiB = 1,048,576 bytes.
    - delete the temporary directory;
    - return ExistingDocument(existingId);
    - navigate to the existing document instead of creating a duplicate.
-6. Select the parser by verified MIME type and file signature/extension. If MIME and content/extension evidence conflict, reject the source as UNSUPPORTED_FORMAT rather than guessing.
-7. Rename source.bin to source.txt for TXT or source.epub for EPUB, then rename the temporary directory to filesDir/documents/{documentId} using File.renameTo on the same filesystem. Treat either false return as an import failure.
+6. Select exactly one parser under Section 8.1 and run its validation. Reject ambiguous or strongly conflicting claims as `UNSUPPORTED_FORMAT`.
+7. Rename source.bin to `source.txt`, `source.md`, `source.epub`, or `source.pdf` according to the selected parser's canonical extension, then rename the temporary directory to filesDir/documents/{documentId} using File.renameTo on the same filesystem. Treat either false return as an import failure. A `.markdown` source is stored canonically as `source.md`.
 8. Read parser metadata from the finalized source and prepare a lazy paragraph sequence. Do not collect the sequence into one in-memory list.
 9. Begin one Room transaction and insert a provisional document row that remains invisible outside the uncommitted transaction.
 10. Consume the parser's sequence once inside that transaction. Normalize and insert paragraphs in batches of 250 while computing section bounds, paragraph indexes, and absolute offsets.
@@ -702,7 +722,44 @@ Algorithm:
 
 Do not execute or preserve EPUB scripts.
 
-### 8.6 Import UI states
+### 8.6 Markdown parser
+
+Use the deterministic text decoder from Section 8.4. Accept `.md` and `.markdown` filenames and store the private copy with canonical extension `.md`.
+
+Algorithm:
+
+1. Decode UTF-8 with or without BOM, or BOM-marked UTF-16LE/UTF-16BE; reject malformed input.
+2. Recognize ATX headings with one through six leading `#` characters followed by whitespace.
+3. Emit each readable ATX heading as text and start a new section at it. Content before the first heading belongs to section zero with a null section title.
+4. Use the first non-blank ATX heading, after inline-markup removal, as the document title; otherwise use the filename without extension.
+5. Split ordinary paragraphs on blank lines. Emit list items and blockquotes as individual readable blocks.
+6. Remove inline link/image destinations, emphasis markers, inline-code delimiters, escapes, and HTML markup while retaining their readable label/text.
+7. Discard thematic breaks and link-reference definitions.
+8. Exclude all content inside backtick or tilde fenced code blocks. An opening fence remains active until the next fence marker or end of file.
+9. Collapse whitespace and discard blank output through the common importer normalization.
+
+Markdown is treated as authored reading text, not rendered as an interactive HTML document. Do not execute raw HTML, scripts, links, or embedded content.
+
+### 8.7 PDF text parser
+
+Use PDFBox-Android `2.0.27.0`. Initialize `PDFBoxResourceLoader` once from the application context before any PDFBox API is used. Parsing must remain offline and inside `:data`.
+
+Algorithm:
+
+1. Require the first five bytes to equal `%PDF-`; otherwise return `MALFORMED_DOCUMENT`.
+2. Open the app-private copy with PDFBox. Map invalid-password or encrypted-document state to `PDF_ENCRYPTED`; map invalid/unreadable PDF structure to `MALFORMED_DOCUMENT`.
+3. Reject a document with more than 10,000 pages before extraction.
+4. Use a position-sorting `PDFTextStripper` and extract exactly one page per iteration so cancellation and page limits remain observable.
+5. Check coroutine cancellation before every page.
+6. Accumulate extracted Kotlin `String.length`; reject when the total exceeds 25,000,000 UTF-16 code units.
+7. Remove non-whitespace control characters, split page output on blank lines, trim each block, and discard blank blocks.
+8. Emit page `n` into zero-based section index `n - 1` with a null section title. Do not infer visual headings.
+9. Use the embedded PDF title when non-blank; otherwise use the filename without extension.
+10. If every page yields blank text, let the common import transaction return `NO_READABLE_TEXT` and remove all provisional data.
+
+Do not render PDF pages, execute document JavaScript, activate links/forms/annotations, extract embedded media, attempt passwords, or perform OCR. Complex positioned and multi-column documents have best-effort narration order determined by their internal text positioning.
+
+### 8.8 Import UI states
 
 Implement exactly these states:
 
@@ -717,12 +774,12 @@ Implement exactly these states:
 
 Disable the Add book control while the same ViewModel owns an active import. Cancellation must close all streams, remove the temporary directory, and leave Room unchanged.
 
-### 8.7 Common metadata normalization
+### 8.9 Common metadata normalization
 
 - Replace ISO control characters in titles and filenames with ordinary spaces.
 - Collapse whitespace, trim the result, and limit each stored title/filename to 200 UTF-16 code units without splitting a surrogate pair.
 - Use “Untitled book” if the resolved title becomes blank.
-- Store canonical MIME text/plain for TXT and application/epub+zip for EPUB, regardless of a provider's generic MIME.
+- Store canonical MIME `text/plain` for TXT, `text/markdown` for Markdown, `application/epub+zip` for EPUB, and `application/pdf` for PDF, regardless of a provider's weak MIME.
 - Accept a language tag only when Locale.forLanguageTag produces a non-blank language. Store the normalized Locale.toLanguageTag result; otherwise store null.
 - Set importedAt from an injected TimeProvider at the successful transaction commit.
 - Set lastOpenedAt to null on import and update it when Reader successfully reaches Ready.
@@ -992,7 +1049,7 @@ Delete behavior:
 
 Empty-state copy must explain:
 
-- “Add a TXT or EPUB book.”
+- “Add a TXT, Markdown, EPUB, or PDF book.”
 - “Books and reading progress stay on this device.”
 
 ### 11.3 Reader screen
@@ -1149,7 +1206,7 @@ Generated title placeholder:
 - [ ] Create artwork/play-store-icon-512.png from the master.
 - [x] Create playback/src/main/res/drawable/ic_notification.xml as a solid white-compatible silhouette with transparency.
 - [x] Create designsystem/src/main/res/drawable/illustration_empty_library.xml.
-- [x] Create reusable TXT and EPUB type indicators in :designsystem from the same icon family.
+- [x] Create reusable TXT, Markdown, EPUB, and PDF type indicators in :designsystem from the same icon family, or use the documented deterministic title placeholder when the format is not shown separately.
 - [x] Use one consistent Material icon family for playback and settings actions.
 - [x] Create light and dark splash theme resources using the launcher symbol.
 - [x] Create a deterministic book placeholder composable using title initials and a palette selected from the SHA-256 prefix.
@@ -1164,13 +1221,15 @@ Use stable error codes internally and map them to localized copy in :app.
 
 | Code | User message intent | Required recovery |
 |---|---|---|
-| UNSUPPORTED_FORMAT | Only TXT and EPUB are supported | Return to picker |
+| UNSUPPORTED_FORMAT | Only TXT, Markdown, EPUB, and PDF are supported | Return to picker |
 | FILE_TOO_LARGE | File exceeds 100 MiB | Choose another file |
 | SOURCE_UNREADABLE | Android could not read the selected file | Retry picker |
 | UNSUPPORTED_ENCODING | TXT encoding is not supported | Explain UTF-8/UTF-16 requirement |
 | MALFORMED_DOCUMENT | File is corrupt or invalid | Choose another file |
 | EPUB_ENCRYPTED | Protected EPUB cannot be read | Return to Library |
 | EPUB_LIMIT_EXCEEDED | EPUB expands beyond safety limits | Return to Library |
+| PDF_ENCRYPTED | Password-protected or encrypted PDF cannot be read | Choose an unprotected text PDF |
+| PDF_LIMIT_EXCEEDED | PDF exceeds page or extracted-text safety limits | Choose a smaller PDF |
 | NO_READABLE_TEXT | Document contains no readable text | Return to Library |
 | STORAGE_FULL | Not enough local space | Open Android storage settings or retry |
 | DATABASE_ERROR | Book could not be saved | Retry import |
@@ -1196,6 +1255,7 @@ TTS_SPEAK_FAILED retry policy:
 - [x] Reject EPUB path traversal and enforce all ZIP limits in Section 8.
 - [x] Before recursive cleanup, resolve and verify that the target's canonical parent is exactly filesDir/documents and that its name is a valid document UUID, .import-UUID, or .delete-UUID; refuse every broader or unresolved target.
 - [x] Parse EPUB scripts as inert text or discard them; never execute them.
+- [x] Treat PDF JavaScript, forms, annotations, links, images, and embedded media as inert; extract text only and never perform OCR or password attempts.
 - [x] Keep NarrationService unexported.
 - [x] Every PendingIntent created by Orator must use FLAG_IMMUTABLE; combine it with FLAG_UPDATE_CURRENT when the intent is reused.
 - [x] Exclude imported originals, Room document content, and progress from cloud/device-transfer backup.
@@ -1273,12 +1333,14 @@ Exit criteria:
 
 ## 18. Phase 2 — Import and Library
 
-- [x] Implement the OpenDocument launcher with only TXT and EPUB MIME types.
+- [x] Implement the OpenDocument launcher with the TXT, Markdown, EPUB, and PDF MIME types in Section 8.1.
 - [x] Implement bounded source copying and SHA-256 hashing.
 - [x] Implement temporary import directories and fresh-process startup cleanup before enabling imports.
 - [x] Implement duplicate detection by SHA-256.
 - [x] Implement the TXT parser exactly as Section 8.4.
 - [x] Implement the EPUB parser exactly as Section 8.5.
+- [x] Implement the Markdown parser exactly as Section 8.6.
+- [x] Implement the PDF text parser exactly as Section 8.7.
 - [x] Enforce all file and archive limits.
 - [x] Implement offset generation with exactly two conceptual newline characters between paragraphs.
 - [x] Insert successful imports transactionally.
@@ -1288,13 +1350,13 @@ Exit criteria:
 - [x] Implement Continue reading.
 - [x] Implement deterministic title placeholders.
 - [x] Implement delete confirmation and active-playback stop coordination.
-- [x] Add parser fixtures for UTF-8 TXT, UTF-16 TXT, EPUB 2, EPUB 3, malformed EPUB, encrypted EPUB, traversal ZIP, oversized ZIP, and empty content.
+- [x] Add parser fixtures for UTF-8 TXT, UTF-16 TXT, Markdown headings/inline syntax/fenced code, text PDF page order/metadata, malformed PDF, EPUB 2, EPUB 3, malformed EPUB, encrypted EPUB, traversal ZIP, oversized ZIP, and empty content.
 - [x] Add parser golden tests proving spine and paragraph order.
 - [ ] Add an instrumentation test importing through a fake ContentProvider.
 
 Exit criteria:
 
-- [ ] AC-001, AC-002, AC-003, AC-004, AC-005, and AC-006 pass.
+- [ ] AC-001 through AC-006 and AC-028 through AC-030 pass.
 - [x] Import failure leaves neither Room rows nor orphaned final document directories.
 - [ ] The Library remains functional with at least 100 imported metadata records.
 
@@ -1383,7 +1445,7 @@ Exit criteria:
 - [ ] AC-022 through AC-027 pass.
 - [ ] All required graphics render correctly in light and dark themes.
 - [x] The release manifest contains no INTERNET or broad-storage permission.
-- [ ] ./gradlew test lint assembleRelease succeeds.
+- [x] `./gradlew test`, `:app:lintDebug`, `checkModuleDependencyRules`, and `:app:assembleRelease` succeed.
 
 ## 22. Acceptance scenarios
 
@@ -1395,6 +1457,9 @@ Exit criteria:
 - [ ] **AC-004 — Duplicate:** Import the same bytes twice under different filenames. The second import opens the existing document and creates no new rows/files.
 - [ ] **AC-005 — Invalid source:** Import malformed, encrypted, traversal, empty, and oversized fixtures. Each shows the mapped error and leaves no final data.
 - [ ] **AC-006 — Source removed:** Import a book, delete or move the user's original, and confirm the imported copy still opens and speaks.
+- [ ] **AC-028 — Markdown:** Import UTF-8 and BOM-marked UTF-16 `.md` fixtures, including one provider that reports `text/plain`. Headings create sections, inline formatting is narrated without markup/destinations, fenced code is absent, and the first heading becomes the title.
+- [ ] **AC-029 — Text PDF:** Import a two-page, unencrypted text PDF. Embedded title metadata is used, both page texts appear in order as separate page sections, and narration starts from the extracted first paragraph.
+- [ ] **AC-030 — Unsupported PDF content:** Import an encrypted PDF, an image-only PDF, a malformed `.pdf`, a PDF over 10,000 pages, and a PDF whose extracted text exceeds 25,000,000 UTF-16 code units. Each returns its specified localized error and leaves no Room rows or private final directory.
 
 ### Playback and durability
 
@@ -1430,7 +1495,7 @@ Exit criteria:
 
 ### Product
 
-- [ ] A new user can import TXT or EPUB without being taught Android storage concepts.
+- [ ] A new user can import TXT, Markdown, EPUB, or text-based PDF without being taught Android storage concepts.
 - [ ] A user can read along with narration and identify the currently spoken text.
 - [ ] Screen-off playback works with system controls.
 - [ ] Progress survives process death, force-stop, shutdown, and reboot.
@@ -1469,7 +1534,7 @@ Exit criteria:
 Before release, answer every item with evidence in a code review:
 
 - [x] **Single Responsibility:** Each parser only parses its format; each repository only owns its persistence concern; NarrationCoordinator owns sequencing but not Android TTS implementation.
-- [x] **Open/Closed:** A future PDF parser can be registered without changing TXT/EPUB parsers or import use cases.
+- [x] **Open/Closed:** Markdown and PDF were registered through parser multibinding without changing TXT/EPUB parsing or import use cases; a future DOCX parser can use the same contract.
 - [ ] **Liskov Substitution:** Fake SpeechEngine and repository implementations pass the same contract tests as production implementations.
 - [x] **Interface Segregation:** Screens depend on use cases and NarrationController, not a large service or database interface.
 - [x] **Dependency Inversion:** :domain defines interfaces; :data and :playback implement them; Hilt binds implementations at the application boundary.

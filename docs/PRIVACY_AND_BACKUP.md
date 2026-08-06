@@ -8,6 +8,7 @@
 - Document text, titles, source URIs, utterance text, and private file paths are never logged in production.
 - No analytics or crash-reporting SDKs are included in v1.
 - Orator uses the device's installed TextToSpeech engine; only offline-capable voices are eligible, and no speech audio is recorded or uploaded.
+- Markdown conversion and PDF text extraction run locally. PDFBox-Android reads only the app-private copy; Orator does not execute PDF JavaScript or embedded media, attempt passwords, or send PDF content to an OCR/network service.
 
 ## Backup and device transfer
 

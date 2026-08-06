@@ -10,7 +10,7 @@ This review records source-level evidence for the architecture checklist. Device
 | Domain isolation | `:domain` is a Kotlin/JVM module; `rg` finds no Android SDK imports under `domain/src/main`. | Pass |
 | UI boundary | `:app` ViewModels call domain use cases and ports; Room and `TextToSpeech` occur only in `:data` and `:playback`. | Pass |
 | Playback boundary | `:playback` depends on `:domain` only and reaches content/progress/settings through domain interfaces. | Pass |
-| Parser substitution | `BookParserRegistry` receives parsers through Hilt multibinding and resolves the matching `BookParser`; the importer no longer constructs a format-specific parser. Parser golden tests use both implementations. | Pass |
+| Parser substitution | `BookParserRegistry` receives TXT, Markdown, EPUB, and PDF parsers through Hilt multibinding. Each parser declares extensions and MIME claims; the registry applies common weak/strong evidence rules and the importer constructs no format-specific parser. Parser and registry tests cover all four registrations. | Pass |
 | Fake substitution | `playback/src/test/.../NarrationTestFakes.kt` implements the same `SpeechEngine`, repository, clock, focus, and environment ports used by `NarrationCoordinatorTest`. | Partial: production TTS is Android-only and still needs a device contract run |
 
 The partial item is intentionally not checked in Section 24 until an Android-engine contract test is executed on a device.

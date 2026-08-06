@@ -17,11 +17,7 @@ private const val MAX_EPUB_TOTAL_BYTES = 250L * 1024L * 1024L
 
 internal class EpubParser : BookParser {
     override val extension: String = "epub"
-
-    override fun accepts(source: com.noloxtreme.tts.reader.domain.ImportSource): Boolean {
-        val name = source.displayName.lowercase(Locale.ROOT)
-        return source.mimeType.equals("application/epub+zip", true) || name.endsWith(".epub")
-    }
+    override val supportedMimeTypes: Set<String> = setOf("application/epub+zip")
 
     override fun validate(file: File) {
         if (!isEpub(file)) throw ImportException(ImportError.MALFORMED_DOCUMENT)

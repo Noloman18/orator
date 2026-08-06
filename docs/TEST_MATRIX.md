@@ -5,9 +5,7 @@ Measurement method: automated Gradle test tasks; physical-device rows are record
 Automated verification run on 2026-08-06 from the repository root:
 
 - `./gradlew test --no-configuration-cache --no-daemon --console=plain` — passed.
-- `./gradlew :app:lintDebug --no-configuration-cache --no-daemon --console=plain` — passed; report at `app/build/reports/lint-results-debug.html`.
-- `./gradlew checkModuleDependencyRules --no-configuration-cache --no-daemon --console=plain` — passed.
-- `./gradlew :app:assembleRelease --no-configuration-cache --no-daemon --console=plain` — passed; unsigned APK at `app/build/outputs/apk/release/app-release-unsigned.apk`.
+- `./gradlew :app:lintDebug checkModuleDependencyRules :app:assembleRelease --no-configuration-cache --no-daemon --console=plain` — passed after the Markdown/PDF addition; lint report at `app/build/reports/lint-results-debug.html` and 24 MiB unsigned APK at `app/build/outputs/apk/release/app-release-unsigned.apk`.
 - Merged release manifest inspected at `app/build/intermediates/merged_manifests/release/processReleaseManifest/AndroidManifest.xml`; only Orator playback permissions plus the generated non-exported receiver permission remain. No `INTERNET`, `ACCESS_NETWORK_STATE`, broad-storage, media-storage, or boot-start permission is present.
 
 ## Automated unit and Robolectric tests (JVM)
@@ -19,7 +17,10 @@ Automated verification run on 2026-08-06 from the repository root:
 | Room DAOs: cascade delete, unique SHA-256, foreign keys, atomic rollback | :data | `./gradlew :data:testDebugUnitTest` (Robolectric, in-memory SQLite) |
 | Progress validation against paragraphs | :data | `./gradlew :data:testDebugUnitTest` (Robolectric) |
 | TXT parser golden tests (UTF-8/16, BOM, CRLF, normalization, malformed) | :data | `./gradlew :data:testDebugUnitTest` |
+| Markdown parser tests (UTF-8/16, heading sections, inline syntax, fenced-code exclusion, weak-MIME resolution) | :data | `./gradlew :data:testDebugUnitTest` |
 | EPUB parser golden tests (EPUB 2/3, spine order, nav labels, encrypted, traversal, limits) | :data | `./gradlew :data:testDebugUnitTest` |
+| PDF parser tests (signature validation, embedded title, page-order text extraction) | :data | `./gradlew :data:testDebugUnitTest` (Robolectric with merged PDFBox assets) |
+| Parser registry evidence rules (extensions, weak provider MIME, strong-claim conflicts) | :data | `./gradlew :data:testDebugUnitTest` |
 | Metadata normalization (control chars, 200-unit truncation, surrogate safety) | :data | `./gradlew :data:testDebugUnitTest` |
 | Narration state machine (fake engine/clock/audio focus/environment) | :playback | `./gradlew :playback:testDebugUnitTest` |
 | Stale-callback rejection, pause-safety, retry-once, focus rules, wake-lock ownership | :playback | `./gradlew :playback:testDebugUnitTest` |
@@ -56,6 +57,9 @@ Automated verification run on 2026-08-06 from the repository root:
 | AC-025 TalkBack navigation | | | | | |
 | AC-026 offline flows | | | | | |
 | AC-027 permission audit | | | | | |
+| AC-028 Markdown import and narration text | | | | | |
+| AC-029 two-page text PDF import | | | | | |
+| AC-030 encrypted/image-only/malformed/limit PDF rejection | | | | | |
 
 ## Performance budgets (release build, pending)
 
