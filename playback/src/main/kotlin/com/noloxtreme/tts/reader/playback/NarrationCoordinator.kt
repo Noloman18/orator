@@ -108,6 +108,10 @@ class NarrationCoordinator @Inject constructor(
             is NarrationCommand.Pause -> pause(resumeOnFocusGain = false)
             NarrationCommand.PreviousSentence -> moveSentence(previous = true)
             NarrationCommand.NextSentence -> moveSentence(previous = false)
+            is NarrationCommand.JumpSentences -> moveSentence(
+                previous = command.previous,
+                count = command.count
+            )
             is NarrationCommand.SeekTo -> seekTo(command.position)
             NarrationCommand.Stop -> stop()
             NarrationCommand.RestartCompleted -> restartCompleted()
@@ -257,7 +261,7 @@ class NarrationCoordinator @Inject constructor(
         mutableState.value = NarrationState.Paused(currentDocument.id, resumePosition, null)
     }
 
-    private suspend fun moveSentence(previous: Boolean) {
+    private suspend fun moveSentence(previous: Boolean, count: Int = 1) {
         val currentDocument = document ?: return
         val currentPosition = when (val currentState = mutableState.value) {
             is NarrationState.Playing -> currentState.safePosition
@@ -267,10 +271,13 @@ class NarrationCoordinator @Inject constructor(
         }
         val wasPlaying = currentStateWasPlaying()
         invalidateSession()
-        val moved = if (previous) {
-            contentRepository.sentenceBefore(currentDocument.id, currentPosition)
-        } else {
-            contentRepository.sentenceAfter(currentDocument.id, currentPosition)
+        var moved = currentPosition
+        repeat(count) {
+            moved = if (previous) {
+                contentRepository.sentenceBefore(currentDocument.id, moved)
+            } else {
+                contentRepository.sentenceAfter(currentDocument.id, moved)
+            }
         }
         savePosition(moved, false, force = true)
         mutableState.value = NarrationState.Paused(currentDocument.id, moved, null)

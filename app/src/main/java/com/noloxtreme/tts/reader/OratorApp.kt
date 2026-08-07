@@ -30,6 +30,8 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.FastForward
+import androidx.compose.material.icons.outlined.FastRewind
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.Replay
@@ -73,6 +75,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
@@ -105,6 +108,7 @@ import com.noloxtreme.tts.reader.domain.PlaybackError
 import com.noloxtreme.tts.reader.domain.SpokenRange
 import com.noloxtreme.tts.reader.domain.ThemePreference
 import com.noloxtreme.tts.reader.designsystem.BookPlaceholder
+import com.noloxtreme.tts.reader.designsystem.OratorDesignTokens
 import com.noloxtreme.tts.reader.designsystem.R as DesignSystemR
 import com.noloxtreme.tts.reader.playback.NarrationService
 import com.noloxtreme.tts.reader.ui.AppViewModel
@@ -185,13 +189,35 @@ private fun OratorSplashScreen() {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(OratorDesignTokens.ink)
     ) {
         Image(
             painter = painterResource(R.drawable.orator_splash_art),
             contentDescription = stringResource(R.string.splash_screen_description),
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize()
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            Color(0xCC1E1411)
+                        )
+                    )
+                )
+        )
+        Text(
+            text = stringResource(R.string.app_name).uppercase(),
+            style = MaterialTheme.typography.displaySmall,
+            color = Color(0xFFFFEBDD),
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 6.sp,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 56.dp)
         )
     }
 }
@@ -544,6 +570,7 @@ private fun ReaderScreen(
                 ReaderControls(
                     narration = narration,
                     playing = playing,
+                    onRewind = viewModel::rewind,
                     onPrevious = viewModel::previousSentence,
                     onPlay = {
                         if (!playing) {
@@ -556,7 +583,8 @@ private fun ReaderScreen(
                         }
                         if (narration is NarrationState.Completed) viewModel.restart() else if (playing) viewModel.pause() else viewModel.play()
                     },
-                    onNext = viewModel::nextSentence
+                    onNext = viewModel::nextSentence,
+                    onFastForward = viewModel::fastForward
                 )
             }
         }
@@ -725,8 +753,8 @@ private fun highlightedText(text: String, range: SpokenRange?): AnnotatedString 
     if (end > start) {
         pushStyle(
             SpanStyle(
-                background = Color(0xFFFFD54F),
-                color = Color(0xFF211A00),
+                background = OratorDesignTokens.warmHighlight,
+                color = OratorDesignTokens.ink,
                 fontWeight = FontWeight.SemiBold
             )
         )
@@ -740,9 +768,11 @@ private fun highlightedText(text: String, range: SpokenRange?): AnnotatedString 
 private fun ReaderControls(
     narration: NarrationState,
     playing: Boolean,
+    onRewind: () -> Unit,
     onPrevious: () -> Unit,
     onPlay: () -> Unit,
-    onNext: () -> Unit
+    onNext: () -> Unit,
+    onFastForward: () -> Unit
 ) {
     Surface(
         modifier = Modifier
@@ -757,6 +787,12 @@ private fun ReaderControls(
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            IconButton(onClick = onRewind) {
+                Icon(
+                    Icons.Outlined.FastRewind,
+                    contentDescription = stringResource(R.string.rewind)
+                )
+            }
             IconButton(onClick = onPrevious) { Icon(Icons.Outlined.SkipPrevious, contentDescription = stringResource(R.string.previous_sentence)) }
             IconButton(onClick = onPlay, modifier = Modifier.size(56.dp)) {
                 Icon(
@@ -775,6 +811,12 @@ private fun ReaderControls(
                 )
             }
             IconButton(onClick = onNext) { Icon(Icons.Outlined.SkipNext, contentDescription = stringResource(R.string.next_sentence)) }
+            IconButton(onClick = onFastForward) {
+                Icon(
+                    Icons.Outlined.FastForward,
+                    contentDescription = stringResource(R.string.fast_forward)
+                )
+            }
         }
     }
 }

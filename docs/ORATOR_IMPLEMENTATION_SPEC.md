@@ -41,7 +41,7 @@ Definitions:
 - [x] Display normalized book text in a Reader screen.
 - [x] Speak the text through the device's installed Android TextToSpeech engine.
 - [ ] Continue narration while the screen is off.
-- [x] Provide play, pause, previous-sentence, and next-sentence system media controls.
+- [x] Provide play, pause, previous-sentence, next-sentence, rewind, and fast-forward narration controls.
 - [x] Highlight the spoken word or range on API 26 and newer when the installed engine supplies timing ranges.
 - [x] Highlight the active sentence/segment on API 24 and 25, and on any newer engine that omits timing ranges.
 - [ ] Persist progress between screen changes, process death, force-stop, normal shutdown, and device reboot.
@@ -840,6 +840,10 @@ Expose these system commands:
 - Next media item mapped to next sentence
 - Stop
 
+The reader and narration notification also expose rewind and fast-forward actions. Each action
+moves by five sentence starts, preserving text boundaries without pretending that synthesized
+speech has a stable elapsed-time duration.
+
 Do not expose a time-based seek bar because TTS duration is not known reliably. The in-app reader must display character-percentage progress as floor(absoluteOffset * 100 / totalCharacterCount), clamped to 0 through 100.
 
 Media metadata:
@@ -853,7 +857,7 @@ Notification:
 - Ongoing only while Preparing or Playing.
 - Dismissible while Paused; dismissal stops the session but retains progress.
 - Uses the monochrome Orator notification icon.
-- Shows play/pause and previous/next sentence controls.
+- Shows play/pause, previous/next sentence, rewind, and fast-forward controls.
 
 ### 9.3 TTS initialization
 
@@ -955,6 +959,10 @@ Previous/next sentence behavior:
 - Use the active-range start as the anchor while Playing; otherwise use the durable progress position.
 - Previous selects the nearest sentence start strictly before the anchor. If none exists in the paragraph, select the final sentence start in the preceding paragraph. Clamp to document start.
 - Next selects the nearest sentence start strictly after the anchor. If none exists in the paragraph, select offset zero in the following paragraph. Clamp to document end.
+
+Rewind and fast-forward repeat the corresponding sentence movement five times in one atomic
+position change. They use the same active-range/progress anchor and resume narration when it was
+playing before the jump.
 - Save the selected position before issuing new speech.
 - If the prior state was Playing, stop the old session segment and immediately speak from the selected position.
 - If the prior state was Paused, update the paused cursor without starting speech.
@@ -1406,6 +1414,7 @@ Exit criteria:
 - [x] Implement follow mode and exact user-scroll behavior.
 - [x] Implement Return to narration.
 - [x] Implement previous- and next-sentence commands.
+- [x] Implement five-sentence rewind and fast-forward controls in the reader and notification.
 - [x] Implement MissingDocument recovery.
 - [x] Add TalkBack labels and semantics.
 - [ ] Add Compose tests for play/pause icon and label changes.

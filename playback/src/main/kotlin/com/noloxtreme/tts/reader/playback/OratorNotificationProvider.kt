@@ -3,6 +3,7 @@ package com.noloxtreme.tts.reader.playback
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.os.Bundle
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.graphics.drawable.IconCompat
@@ -11,11 +12,15 @@ import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaNotification
 import androidx.media3.session.MediaSession
 import com.google.common.collect.ImmutableList
+import com.noloxtreme.tts.reader.domain.FAST_JUMP_SENTENCE_COUNT
+import com.noloxtreme.tts.reader.domain.NarrationCommand
+import com.noloxtreme.tts.reader.domain.NarrationController
 
 /** Media notification per spec Section 9.2: ongoing while active, dismissible when paused. */
 @androidx.media3.common.util.UnstableApi
 class OratorNotificationProvider(
-    private val context: Context
+    private val context: Context,
+    private val narrationController: NarrationController
 ) : MediaNotification.Provider {
     /**
      * Media3 reads the channel metadata from this provider, but custom providers still need to
@@ -44,8 +49,28 @@ class OratorNotificationProvider(
     override fun handleCustomCommand(
         session: MediaSession,
         customAction: String,
-        extras: android.os.Bundle
-    ): Boolean = false
+        extras: Bundle
+    ): Boolean = when (customAction) {
+        CUSTOM_REWIND_ACTION -> {
+            narrationController.dispatch(
+                NarrationCommand.JumpSentences(
+                    previous = true,
+                    count = FAST_JUMP_SENTENCE_COUNT
+                )
+            )
+            true
+        }
+        CUSTOM_FAST_FORWARD_ACTION -> {
+            narrationController.dispatch(
+                NarrationCommand.JumpSentences(
+                    previous = false,
+                    count = FAST_JUMP_SENTENCE_COUNT
+                )
+            )
+            true
+        }
+        else -> false
+    }
 
     override fun createNotification(
         session: MediaSession,
@@ -85,6 +110,15 @@ class OratorNotificationProvider(
                 )
             )
             .addAction(
+                actionFactory.createCustomAction(
+                    session,
+                    IconCompat.createWithResource(context, REWIND_ICON),
+                    context.getString(R.string.notification_rewind),
+                    CUSTOM_REWIND_ACTION,
+                    Bundle.EMPTY
+                )
+            )
+            .addAction(
                 actionFactory.createMediaAction(
                     session,
                     IconCompat.createWithResource(
@@ -93,6 +127,15 @@ class OratorNotificationProvider(
                     ),
                     context.getString(if (playing) R.string.notification_pause else R.string.notification_play),
                     Player.COMMAND_PLAY_PAUSE
+                )
+            )
+            .addAction(
+                actionFactory.createCustomAction(
+                    session,
+                    IconCompat.createWithResource(context, FAST_FORWARD_ICON),
+                    context.getString(R.string.notification_fast_forward),
+                    CUSTOM_FAST_FORWARD_ACTION,
+                    Bundle.EMPTY
                 )
             )
             .addAction(
@@ -123,8 +166,12 @@ class OratorNotificationProvider(
         const val NOTIFICATION_CHANNEL_ID = "orator_playback"
         const val NOTIFICATION_ID = 1001
         const val PREVIOUS_ICON = android.R.drawable.ic_media_previous
+        const val REWIND_ICON = android.R.drawable.ic_media_rew
         const val PLAY_ICON = android.R.drawable.ic_media_play
         const val PAUSE_ICON = android.R.drawable.ic_media_pause
+        const val FAST_FORWARD_ICON = android.R.drawable.ic_media_ff
         const val NEXT_ICON = android.R.drawable.ic_media_next
+        const val CUSTOM_REWIND_ACTION = "com.noloxtreme.tts.reader.action.REWIND"
+        const val CUSTOM_FAST_FORWARD_ACTION = "com.noloxtreme.tts.reader.action.FAST_FORWARD"
     }
 }

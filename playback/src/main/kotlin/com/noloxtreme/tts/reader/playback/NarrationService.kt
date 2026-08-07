@@ -70,7 +70,7 @@ class NarrationService : MediaSessionService() {
             )
         }
         mediaSession = sessionBuilder.build()
-        val notificationProvider = OratorNotificationProvider(this)
+        val notificationProvider = OratorNotificationProvider(this, narrationController)
         notificationProvider.ensureNotificationChannel()
         setMediaNotificationProvider(notificationProvider)
         setShowNotificationForIdlePlayer(SHOW_NOTIFICATION_FOR_IDLE_PLAYER_AFTER_STOP_OR_ERROR)

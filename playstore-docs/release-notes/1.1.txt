@@ -1,0 +1,8 @@
+Version 1.1 (build 2)
+
+What's new in this release:
+
+- New Roman-inspired visual design and splash screen
+- Rewind and fast-forward narration by five sentences
+- Rewind and fast-forward controls are also available in the playback notification
+- Improved sentence-aware narration navigation and playback state handling

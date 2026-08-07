@@ -1,6 +1,6 @@
 <resources>
     <string name="app_name">Orator</string>
-    <string name="splash_screen_description">Expressionist painting of a Roman orator</string>
+    <string name="splash_screen_description">Classical painting of a Roman orator</string>
     <string name="library_title">Library</string>
     <string name="settings_title">Settings</string>
     <string name="reader_title">Reader</string>
@@ -51,6 +51,8 @@
     <string name="replay">Replay</string>
     <string name="previous_sentence">Previous sentence</string>
     <string name="next_sentence">Next sentence</string>
+    <string name="rewind">Rewind five sentences</string>
+    <string name="fast_forward">Fast-forward five sentences</string>
     <string name="remove_book_action">Remove book</string>
     <string name="imported_book">Imported book</string>
     <string name="theme_light">Light</string>

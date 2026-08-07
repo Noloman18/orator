@@ -313,6 +313,23 @@ class NarrationCoordinatorTest {
     }
 
     @Test
+    fun jumpSentencesMovesBySentenceBoundariesWithoutSpeech() = runTest {
+        val h = harness()
+        h.coordinator.dispatch(NarrationCommand.Load(documentId))
+        advanceUntilIdle()
+
+        h.coordinator.dispatch(NarrationCommand.JumpSentences(previous = false, count = 2))
+        advanceUntilIdle()
+
+        val state = h.coordinator.state.value
+        assertTrue(state is NarrationState.Paused)
+        assertEquals(1, (state as NarrationState.Paused).resumePosition.paragraphIndex)
+        assertEquals(0, state.resumePosition.offsetInParagraph)
+        assertEquals(36L, state.resumePosition.absoluteOffset)
+        assertTrue(h.engine.spokenSegments.isEmpty())
+    }
+
+    @Test
     fun previousSentenceWhilePlayingMovesAndResumes() = runTest {
         val h = harness()
         h.coordinator.dispatch(NarrationCommand.Load(documentId))

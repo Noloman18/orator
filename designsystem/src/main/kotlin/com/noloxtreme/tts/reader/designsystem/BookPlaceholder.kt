@@ -15,12 +15,12 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 
 private val placeholderPalette = listOf(
-    Color(0xFF285E61),
-    Color(0xFF6B4F7A),
-    Color(0xFF8A5A44),
-    Color(0xFF526D3F),
-    Color(0xFF365B7D),
-    Color(0xFF7A4A58)
+    OratorDesignTokens.primary,
+    Color(0xFF6F4D35),
+    Color(0xFF9A5A3C),
+    Color(0xFF596044),
+    Color(0xFF59616A),
+    Color(0xFF7A3F50)
 )
 
 /** A stable, content-derived cover used when an EPUB cover is intentionally not extracted. */

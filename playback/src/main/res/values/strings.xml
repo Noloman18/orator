@@ -3,7 +3,9 @@
     <string name="notification_default_section">Document</string>
     <string name="notification_channel">Narration</string>
     <string name="notification_previous">Previous sentence</string>
+    <string name="notification_rewind">Rewind five sentences</string>
     <string name="notification_next">Next sentence</string>
+    <string name="notification_fast_forward">Fast-forward five sentences</string>
     <string name="notification_play">Play</string>
     <string name="notification_pause">Pause</string>
 </resources>

@@ -78,6 +78,8 @@ data class ReadingProgress(
     val completed: Boolean
 )
 
+const val FAST_JUMP_SENTENCE_COUNT = 5
+
 enum class ThemePreference {
     SYSTEM,
     LIGHT,
@@ -171,6 +173,14 @@ sealed interface NarrationCommand {
     data class Pause(val userInitiated: Boolean = true) : NarrationCommand
     data object PreviousSentence : NarrationCommand
     data object NextSentence : NarrationCommand
+    data class JumpSentences(
+        val previous: Boolean,
+        val count: Int
+    ) : NarrationCommand {
+        init {
+            require(count > 0)
+        }
+    }
     data class SeekTo(val position: DocumentPosition) : NarrationCommand
     data object Stop : NarrationCommand
     data object RestartCompleted : NarrationCommand

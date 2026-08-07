@@ -8,6 +8,7 @@ import com.noloxtreme.tts.reader.domain.ContentRepository
 import com.noloxtreme.tts.reader.domain.Document
 import com.noloxtreme.tts.reader.domain.DocumentId
 import com.noloxtreme.tts.reader.domain.DocumentPosition
+import com.noloxtreme.tts.reader.domain.FAST_JUMP_SENTENCE_COUNT
 import com.noloxtreme.tts.reader.domain.NarrationCommand
 import com.noloxtreme.tts.reader.domain.NarrationController
 import com.noloxtreme.tts.reader.domain.NarrationState
@@ -137,6 +138,16 @@ class ReaderViewModel @Inject constructor(
     fun previousSentence() = skipSentence.execute(previous = true)
 
     fun nextSentence() = skipSentence.execute(previous = false)
+
+    fun rewind() = skipSentence.execute(
+        previous = true,
+        count = FAST_JUMP_SENTENCE_COUNT
+    )
+
+    fun fastForward() = skipSentence.execute(
+        previous = false,
+        count = FAST_JUMP_SENTENCE_COUNT
+    )
 
     fun restart() = restartCompletedDocument.execute()
 
