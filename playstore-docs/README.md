@@ -9,7 +9,7 @@ Release artifacts and submission notes for the Google Play listing of Orator.
 - `screenshots/phone/` — upload-ready 1080x2160 phone screenshots.
 - `screenshots/` — original device captures, retained as source material.
 - `listing/en-US.md` — English store listing copy.
-- `release-notes/` — release notes, one file per version, e.g. `1.1.txt`.
+- `release-notes/` — release notes, one file per version, e.g. `1.2.txt`.
 - `privacy-policy.md` — privacy policy draft ready to host publicly after replacing its placeholders.
 - `data-safety.md` — Data safety form worksheet based on the current source audit.
 - `asset-inventory.md` — dimensions, alt text, and upload notes for each asset.
@@ -19,7 +19,7 @@ Release artifacts and submission notes for the Google Play listing of Orator.
 
 - App: `Orator`
 - Application ID: `com.noloxtreme.tts.reader`
-- Version: `1.1` (`versionCode 2`)
+- Version: `1.2` (`versionCode 3`)
 - Target API: 37
 - Signed bundle task: `./gradlew buildSignedBundle`
 - Bundle output: `app/release/app-release.aab`

@@ -1,4 +1,5 @@
 import org.gradle.api.GradleException
+import org.gradle.api.tasks.Copy
 import java.io.File
 import java.util.Base64
 
@@ -38,8 +39,8 @@ android {
         applicationId = "com.noloxtreme.tts.reader"
         minSdk = 24
         targetSdk = 37
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 3
+        versionName = "1.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -99,21 +100,18 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
 
+val copySignedBundle = tasks.register<Copy>("copySignedBundle") {
+    dependsOn(tasks.named("bundleRelease"))
+    from(layout.buildDirectory.file("outputs/bundle/release/app-release.aab"))
+    into(layout.projectDirectory.dir("release"))
+    rename { "app-release.aab" }
+}
+
 tasks.register("buildSignedBundle") {
     group = "release"
     description = "Builds a signed release bundle and copies it to app/release/app-release.aab"
     if (keystoreConfigured) {
-        dependsOn(tasks.named("bundleRelease"))
-        doLast {
-            val bundle = layout.buildDirectory.file("outputs/bundle/release/app-release.aab").get().asFile
-            val target = project.file("release/app-release.aab")
-            copy {
-                from(bundle)
-                into(target.parentFile)
-                rename(bundle.name, target.name)
-            }
-            logger.lifecycle("Signed bundle copied to {}", target)
-        }
+        dependsOn(copySignedBundle)
     } else {
         doLast {
             throw GradleException(

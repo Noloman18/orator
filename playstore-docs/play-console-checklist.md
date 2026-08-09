@@ -3,10 +3,10 @@
 ## Ready in the repository
 
 - [x] Signed-bundle Gradle task: `./gradlew buildSignedBundle`.
-- [x] Release metadata: application ID `com.noloxtreme.tts.reader`, version `1.1`,
-      `versionCode 2`, target API 37.
+- [x] Release metadata: application ID `com.noloxtreme.tts.reader`, version `1.2`,
+      `versionCode 3`, target API 37.
 - [x] Play icon, feature graphic, and three upload-ready phone screenshots.
-- [x] English store listing copy and release notes for versions 1.0 and 1.1.
+- [x] English store listing copy and release notes for versions 1.0, 1.1, and 1.2.
 - [x] Privacy policy draft and Data safety worksheet.
 
 ## Still required from the developer or Play Console

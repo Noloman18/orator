@@ -2,6 +2,7 @@ package com.noloxtreme.tts.reader.data
 
 import java.io.File
 import java.io.IOException
+import java.io.StringReader
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import java.util.Locale
@@ -9,6 +10,7 @@ import java.util.zip.ZipFile
 import com.noloxtreme.tts.reader.domain.ImportError
 import org.jsoup.Jsoup
 import org.w3c.dom.Element
+import org.xml.sax.InputSource
 import javax.xml.parsers.DocumentBuilderFactory
 
 private const val MAX_EPUB_ENTRIES = 10_000
@@ -243,20 +245,44 @@ private fun readEntry(zip: ZipFile, entry: java.util.zip.ZipEntry): ByteArray {
     return output.toByteArray()
 }
 
-private fun parseXml(bytes: ByteArray): org.w3c.dom.Document =
-    try {
-        DocumentBuilderFactory.newInstance().apply {
+private fun parseXml(bytes: ByteArray): org.w3c.dom.Document {
+    if (containsDoctype(bytes)) {
+        throw ImportException(ImportError.MALFORMED_DOCUMENT)
+    }
+    return try {
+        /*
+         * Android's built-in DocumentBuilderFactory only supports the basic
+         * namespace/validation features. Apache/Xerces feature URIs such as
+         * disallow-doctype-decl are rejected during factory configuration on
+         * Android, which would make every otherwise-valid EPUB look malformed.
+         * The resolver keeps metadata parsing offline on both Android and JVM.
+         */
+        val builder = DocumentBuilderFactory.newInstance().apply {
             isNamespaceAware = true
-            setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-            setFeature("http://xml.org/sax/features/external-general-entities", false)
-            setFeature("http://xml.org/sax/features/external-parameter-entities", false)
-            setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
-            isXIncludeAware = false
             isExpandEntityReferences = false
-        }.newDocumentBuilder().parse(bytes.inputStream())
+        }.newDocumentBuilder().apply {
+            setEntityResolver { _, _ -> InputSource(StringReader("")) }
+        }
+        builder.parse(bytes.inputStream())
     } catch (error: Throwable) {
         throw ImportException(ImportError.MALFORMED_DOCUMENT).apply { initCause(error) }
     }
+}
+
+private fun containsDoctype(bytes: ByteArray): Boolean {
+    val text = when {
+        bytes.size >= 2 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xFE.toByte() ->
+            String(bytes, 2, bytes.size - 2, StandardCharsets.UTF_16LE)
+        bytes.size >= 2 && bytes[0] == 0xFE.toByte() && bytes[1] == 0xFF.toByte() ->
+            String(bytes, 2, bytes.size - 2, StandardCharsets.UTF_16BE)
+        bytes.size >= 2 && bytes[0] == '<'.code.toByte() && bytes[1] == 0x00.toByte() ->
+            String(bytes, StandardCharsets.UTF_16LE)
+        bytes.size >= 2 && bytes[0] == 0x00.toByte() && bytes[1] == '<'.code.toByte() ->
+            String(bytes, StandardCharsets.UTF_16BE)
+        else -> String(bytes, StandardCharsets.UTF_8)
+    }
+    return text.contains("<!DOCTYPE", ignoreCase = true)
+}
 
 private fun safeZipPath(base: String, href: String): String {
     val decoded = URLDecoder.decode(href.substringBefore('#'), "UTF-8")

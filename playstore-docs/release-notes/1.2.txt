@@ -1,0 +1,7 @@
+Version 1.2 (build 3)
+
+What's new in this release:
+
+- Fixed valid EPUB books being rejected with "The document is malformed"
+- Improved compatibility with EPUB 2 and EPUB 3 books
+- Improved EPUB import validation and stability

@@ -1,7 +1,7 @@
 # Google Play Data safety worksheet
 
 This is source material for the Play Console Data safety form, not a replacement for
-the form. It is based on the current Orator v1.1 (`versionCode 2`) source and must be
+the form. It is based on the current Orator v1.2 (`versionCode 3`) source and must be
 reviewed again if analytics, crash reporting, advertising, online voices, accounts,
 or network access are added.
 

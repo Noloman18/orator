@@ -233,6 +233,25 @@ class EpubParserTest {
     }
 
     @Test
+    fun dtdInPackageMetadataIsRejectedWithoutUsingXmlExternalResources() {
+        val container = containerXml().second.replace(
+            "<?xml version=\"1.0\"?>",
+            "<?xml version=\"1.0\"?>\n<!DOCTYPE container>"
+        )
+        val file = buildEpub(
+            "mimetype" to "application/epub+zip",
+            "META-INF/container.xml" to container,
+            opf2(
+                spineRefs = listOf("c1"),
+                manifest = "<item id=\"c1\" href=\"chapter1.xhtml\" media-type=\"application/xhtml+xml\"/>"
+            ),
+            "OEBPS/chapter1.xhtml" to xhtml("<p>Body.</p>")
+        )
+
+        assertImportError(ImportError.MALFORMED_DOCUMENT) { parser.readMetadata(file, "book.epub") }
+    }
+
+    @Test
     fun traversalHrefIsRejected() {
         val file = buildEpub(
             "mimetype" to "application/epub+zip",
