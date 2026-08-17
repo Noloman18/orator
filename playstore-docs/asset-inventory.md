@@ -5,7 +5,7 @@
 | Asset | Path | Dimensions | Format | Alt text |
 | --- | --- | --- | --- | --- |
 | App icon | `graphics/app-icon-512.png` | 512x512 | 32-bit PNG with alpha | White open book and voice waveform on a deep teal rounded square. |
-| Feature graphic | `graphics/feature-graphic-1024x500.jpg` | 1024x500 | JPEG | Roman orator holding a scroll in a warm fresco-style forum. |
+| Feature graphic | `graphics/feature-graphic-1024x500.jpg` | 1024x500 | JPEG | Smartphone mockup showing the Orator reader with word-highlighted text and playback controls, deep teal background with audio waveforms, ORATOR title and "Turn any document into speech" tagline. |
 
 ## Phone screenshots
 
