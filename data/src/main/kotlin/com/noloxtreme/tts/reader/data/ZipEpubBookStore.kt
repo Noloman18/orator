@@ -30,7 +30,7 @@ internal class DocumentEpubLocator @Inject constructor(
     override suspend fun sourceFile(id: DocumentId): File? = withContext(Dispatchers.IO) {
         val entity = database.documentDao().getById(id.value) ?: return@withContext null
         if (!entity.sourceExtension.equals("epub", ignoreCase = true)) return@withContext null
-        val root = context.filesDir.resolve("documents").canonicalFile
+        val root = context.filesDir.canonicalFile
         val resolved = root.resolve(entity.privateSourcePath).canonicalFile
         var parent = resolved.parentFile
         while (parent != null && parent != root) parent = parent.parentFile
