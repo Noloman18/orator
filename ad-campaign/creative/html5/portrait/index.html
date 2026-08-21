@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="ad.orientation" content="portrait">
+<title>Orator — Tap to listen</title>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #285E61; }
+  #stage {
+    position: fixed; top: 0; left: 0; width: 320px; height: 480px;
+    transform-origin: top left; background: linear-gradient(180deg, #2F6B6F 0%, #285E61 45%, #1F4A4D 100%);
+    overflow: hidden; cursor: pointer; font-family: Georgia, 'Times New Roman', serif;
+  }
+  .wave { position: absolute; bottom: 0; left: 0; width: 100%; height: 130px; opacity: .16; }
+  .wave rect { fill: #FFFFFF; }
+  #headline {
+    position: absolute; top: 34px; width: 100%; text-align: center;
+    color: #FFFFFF; font-size: 26px; font-weight: bold; letter-spacing: .5px;
+    animation: fadein 1s ease both;
+  }
+  #subline {
+    position: absolute; top: 68px; width: 100%; text-align: center;
+    color: rgba(255,255,255,.82); font-size: 13px; letter-spacing: 1.5px;
+    animation: fadein 1.2s ease .3s both;
+  }
+  #card {
+    position: absolute; top: 108px; left: 34px; width: 252px; height: 190px;
+    background: #FFFFFF; border-radius: 14px; padding: 16px 18px;
+    box-sizing: border-box; box-shadow: 0 12px 30px rgba(0,0,0,.25);
+    transition: transform .5s ease; transform-origin: center top;
+  }
+  #card.playing { transform: translateY(16px) scale(.96); }
+  #card h3 { margin: 0 0 10px 0; font-size: 15px; color: #1F4A4D; }
+  .line { height: 7px; background: #D9E6E6; border-radius: 4px; margin-bottom: 8px; }
+  .line.s { width: 82%; }
+  .line.m { width: 94%; }
+  .line.l { width: 88%; }
+  #line-hit { background: #7FB7B9; width: 0; border-radius: 4px; height: 7px; margin-top: -8px; margin-bottom: 8px; }
+  #card.playing #line-hit { animation: read 3.2s linear 1; }
+  #player {
+    position: absolute; top: 318px; left: 24px; width: 272px; height: 62px;
+    background: rgba(0,0,0,.22); border-radius: 31px; display: none;
+    align-items: center; padding: 0 18px; box-sizing: border-box;
+  }
+  #card.playing + #player { display: flex; }
+  #bars { display: flex; align-items: center; gap: 3px; height: 30px; }
+  #bars span { width: 4px; border-radius: 2px; background: #FFFFFF; animation: eq 1s ease-in-out infinite; }
+  #bars span:nth-child(1) { height: 10px; } #bars span:nth-child(2) { height: 20px; }
+  #bars span:nth-child(3) { height: 14px; } #bars span:nth-child(4) { height: 26px; }
+  #bars span:nth-child(5) { height: 18px; } #bars span:nth-child(6) { height: 28px; }
+  #bars span:nth-child(7) { height: 12px; }
+  #now-playing { color: #FFFFFF; font-size: 12px; margin-left: 12px; letter-spacing: .4px; }
+  #promise {
+    position: absolute; top: 392px; width: 100%; text-align: center;
+    color: #FFFFFF; font-size: 15px; font-weight: bold; letter-spacing: .6px;
+    opacity: 0; animation: fadein 1s ease 3.4s both;
+  }
+  #cta {
+    position: absolute; top: 408px; left: 86px; width: 148px; height: 40px;
+    background: #FFFFFF; color: #285E61; border-radius: 20px;
+    font-weight: bold; font-size: 14px; display: flex; align-items: center;
+    justify-content: center; letter-spacing: .5px; opacity: 0;
+    animation: fadein 1s ease 4.2s both, pulse 2s ease-in-out 5.2s infinite;
+    font-family: Arial, Helvetica, sans-serif;
+  }
+  #tap-hint {
+    position: absolute; top: 314px; width: 100%; text-align: center;
+    color: rgba(255,255,255,.9); font-size: 14px; font-weight: bold; letter-spacing: 1px;
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  #icon { position: absolute; top: 452px; left: 12px; width: 34px; height: 34px; border-radius: 8px; }
+  #wordmark { position: absolute; top: 459px; left: 54px; color: rgba(255,255,255,.85); font-size: 13px; font-weight: bold; letter-spacing: .8px; }
+  @keyframes fadein { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.07); } }
+  @keyframes eq { 0%,100% { transform: scaleY(.5); } 50% { transform: scaleY(1.15); } }
+  @keyframes read { from { width: 0; } to { width: 100%; } }
+</style>
+</head>
+<body>
+<div id="stage" onclick="ExitApi.exit()">
+  <svg class="wave" viewBox="0 0 320 130" preserveAspectRatio="none">
+    <rect x="0" y="60" width="6" height="70"></rect>
+    <rect x="12" y="44" width="6" height="86"></rect>
+    <rect x="24" y="30" width="6" height="100"></rect>
+    <rect x="36" y="52" width="6" height="78"></rect>
+    <rect x="48" y="20" width="6" height="110"></rect>
+    <rect x="60" y="40" width="6" height="90"></rect>
+    <rect x="72" y="58" width="6" height="72"></rect>
+    <rect x="84" y="26" width="6" height="104"></rect>
+    <rect x="96" y="48" width="6" height="82"></rect>
+    <rect x="108" y="34" width="6" height="96"></rect>
+    <rect x="120" y="56" width="6" height="74"></rect>
+    <rect x="132" y="22" width="6" height="108"></rect>
+    <rect x="144" y="46" width="6" height="84"></rect>
+    <rect x="156" y="38" width="6" height="92"></rect>
+    <rect x="168" y="54" width="6" height="76"></rect>
+    <rect x="180" y="28" width="6" height="102"></rect>
+    <rect x="192" y="50" width="6" height="80"></rect>
+    <rect x="204" y="36" width="6" height="94"></rect>
+    <rect x="216" y="58" width="6" height="72"></rect>
+    <rect x="228" y="24" width="6" height="106"></rect>
+    <rect x="240" y="44" width="6" height="86"></rect>
+    <rect x="252" y="32" width="6" height="98"></rect>
+    <rect x="264" y="56" width="6" height="74"></rect>
+    <rect x="276" y="40" width="6" height="90"></rect>
+    <rect x="288" y="20" width="6" height="110"></rect>
+    <rect x="300" y="52" width="6" height="78"></rect>
+    <rect x="312" y="46" width="6" height="84"></rect>
+  </svg>
+
+  <div id="headline">No ads. Ever.</div>
+  <div id="subline">TURN ANY DOCUMENT INTO SPEECH</div>
+
+  <div id="card">
+    <h3>Chapter One</h3>
+    <div class="line l"></div>
+    <div class="line m"></div>
+    <div class="line s"></div>
+    <div class="line m"></div>
+    <div id="line-hit"></div>
+    <div class="line s" style="width:64%"></div>
+  </div>
+  <div id="tap-hint">TAP TO LISTEN</div>
+
+  <div id="player">
+    <div id="bars"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+    <div id="now-playing">Now listening — no interruptions</div>
+  </div>
+
+  <div id="promise">No intrusive ads. No pop-ups.</div>
+  <div id="cta">Install</div>
+
+  <img id="icon" src="icon.png" alt="Orator">
+  <div id="wordmark">ORATOR</div>
+</div>
+<script src="https://tpc.googlesyndication.com/pagead/gadgets/html5/api/exitapi.js"></script>
+<script>
+  var stage = document.getElementById('stage');
+  var card = document.getElementById('card');
+  var hint = document.getElementById('tap-hint');
+  var listened = false;
+  stage.addEventListener('click', function () {
+    if (!listened) {
+      listened = true;
+      card.className = 'playing';
+      hint.style.display = 'none';
+    } else {
+      ExitApi.exit();
+    }
+  });
+  function scale() {
+    var s = Math.min(window.innerWidth / 320, window.innerHeight / 480);
+    stage.style.transform = 'scale(' + s + ')';
+  }
+  window.addEventListener('resize', scale);
+  scale();
+</script>
+</body>
+</html>

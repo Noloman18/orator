@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="ad.orientation" content="landscape">
+<title>Orator — Reading vs listening</title>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #285E61; }
+  #stage {
+    position: fixed; top: 0; left: 0; width: 480px; height: 320px;
+    transform-origin: top left; background: linear-gradient(180deg, #2F6B6F 0%, #285E61 55%, #1F4A4D 100%);
+    overflow: hidden; cursor: pointer; font-family: Georgia, 'Times New Roman', serif;
+  }
+  #headline {
+    position: absolute; top: 16px; width: 100%; text-align: center;
+    color: #FFFFFF; font-size: 19px; font-weight: bold; letter-spacing: 1px;
+  }
+  .panel {
+    position: absolute; top: 52px; width: 210px; height: 232px;
+    border-radius: 14px; box-sizing: border-box; text-align: center;
+    transition: box-shadow .4s ease, opacity .4s ease;
+  }
+  #reading-panel { left: 18px; background: rgba(0,0,0,.22); box-shadow: 0 0 0 2px rgba(255,255,255,.85); }
+  #listening-panel { left: 252px; background: rgba(0,0,0,.22); opacity: .55; }
+  #listening-panel.on { box-shadow: 0 0 0 2px rgba(255,255,255,.85); opacity: 1; }
+  #reading-panel.off { opacity: .55; box-shadow: none; }
+  .panel-title { color: #FFFFFF; font-size: 13px; letter-spacing: 1px; margin: 14px 0 8px 0; font-weight: bold; }
+  .face { width: 74px; height: 74px; border-radius: 50%; background: #FFD9A8; margin: 6px auto 10px auto; position: relative; }
+  .eye { position: absolute; top: 26px; width: 8px; height: 8px; border-radius: 50%; background: #2B2620; }
+  .eye.l { left: 20px; } .eye.r { right: 20px; }
+  .brow { position: absolute; top: 19px; width: 16px; height: 4px; background: #2B2620; border-radius: 2px; }
+  .brow.l { left: 16px; transform: rotate(14deg); }
+  .brow.r { right: 16px; transform: rotate(-14deg); }
+  .mouth { position: absolute; bottom: 16px; left: 24px; width: 26px; height: 12px; border-bottom: 4px solid #2B2620; border-radius: 0 0 14px 14px; }
+  .mouth.smile { border-bottom: none; border-top: 4px solid #2B2620; border-radius: 14px 14px 0 0; bottom: 15px; }
+  .sweat { position: absolute; top: 8px; right: 8px; width: 10px; height: 14px; border-radius: 50% 50% 50% 8px; background: #7FB7B9; transform: rotate(15deg); }
+  .stress { position: absolute; top: -4px; right: -8px; font-size: 16px; color: rgba(255,255,255,.85); }
+  .headphone { position: absolute; top: 6px; left: -10px; width: 94px; height: 60px; }
+  .doclines { margin: 0 auto; width: 150px; }
+  .dline { height: 6px; background: #D9E6E6; border-radius: 3px; margin-bottom: 6px; }
+  .dline.w1 { width: 70%; } .dline.w2 { width: 88%; } .dline.w3 { width: 60%; }
+  #bars { display: flex; align-items: center; justify-content: center; gap: 3px; height: 26px; margin-top: 4px; }
+  #bars span { width: 4px; border-radius: 2px; background: #FFFFFF; animation: eq 1s ease-in-out infinite; }
+  #bars span:nth-child(1) { height: 10px; } #bars span:nth-child(2) { height: 20px; }
+  #bars span:nth-child(3) { height: 14px; } #bars span:nth-child(4) { height: 24px; }
+  #bars span:nth-child(5) { height: 12px; }
+  .caption { color: rgba(255,255,255,.9); font-size: 12px; letter-spacing: .4px; margin-top: 8px; }
+  #cta {
+    position: absolute; top: 282px; left: 166px; width: 148px; height: 28px;
+    background: #FFFFFF; color: #285E61; border-radius: 14px; font-size: 12px;
+    font-weight: bold; display: none; align-items: center; justify-content: center;
+    letter-spacing: .5px; font-family: Arial, Helvetica, sans-serif;
+    animation: pulse 2s ease-in-out infinite;
+  }
+  #wordmark { position: absolute; bottom: 8px; left: 12px; color: rgba(255,255,255,.85); font-size: 11px; font-weight: bold; letter-spacing: 1px; }
+  #icon { position: absolute; bottom: 4px; right: 12px; width: 24px; height: 24px; border-radius: 6px; }
+  @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+  @keyframes eq { 0%,100% { transform: scaleY(.5); } 50% { transform: scaleY(1.15); } }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="headline">No ads. Ever.</div>
+
+  <div class="panel" id="reading-panel">
+    <div class="panel-title">TRYING TO READ</div>
+    <div class="face">
+      <div class="brow l"></div><div class="brow r"></div>
+      <div class="eye l"></div><div class="eye r"></div>
+      <div class="mouth"></div>
+      <div class="sweat"></div>
+    </div>
+    <div class="doclines">
+      <div class="dline w2"></div><div class="dline w1"></div><div class="dline w3"></div>
+    </div>
+    <div class="caption">On the bus. In a hurry.</div>
+  </div>
+
+  <div class="panel" id="listening-panel">
+    <div class="panel-title">LISTENING INSTEAD</div>
+    <div class="face">
+      <div class="eye l"></div><div class="eye r"></div>
+      <div class="mouth smile"></div>
+      <svg class="headphone" viewBox="0 0 94 60">
+        <path d="M12 60 L12 30 A35 35 0 0 1 82 30 L82 60" fill="none" stroke="#FFFFFF" stroke-width="7" stroke-linecap="round"></path>
+        <rect x="2" y="44" width="22" height="24" rx="10" fill="#FFFFFF"></rect>
+        <rect x="70" y="44" width="22" height="24" rx="10" fill="#FFFFFF"></rect>
+      </svg>
+    </div>
+    <div id="bars"><span></span><span></span><span></span><span></span><span></span></div>
+    <div class="caption">Orator reads it aloud. Eyes closed.</div>
+  </div>
+
+  <div id="cta" onclick="ExitApi.exit(); return false;">Install</div>
+  <div id="wordmark">ORATOR</div>
+  <img id="icon" src="icon.png" alt="Orator">
+</div>
+<script src="https://tpc.googlesyndication.com/pagead/gadgets/html5/api/exitapi.js"></script>
+<script>
+  var reading = document.getElementById('reading-panel');
+  var listening = document.getElementById('listening-panel');
+  var cta = document.getElementById('cta');
+  var switched = false;
+  document.getElementById('stage').addEventListener('click', function (e) {
+    if (!switched) {
+      switched = true;
+      reading.className = 'panel off';
+      listening.className = 'panel on';
+      cta.style.display = 'flex';
+    } else if (!cta.contains(e.target)) {
+      switched = false;
+      reading.className = 'panel';
+      listening.className = 'panel';
+      cta.style.display = 'none';
+    }
+  });
+  function scale() {
+    var s = Math.min(window.innerWidth / 480, window.innerHeight / 320);
+    document.getElementById('stage').style.transform = 'scale(' + s + ')';
+  }
+  window.addEventListener('resize', scale);
+  scale();
+</script>
+</body>
+</html>
