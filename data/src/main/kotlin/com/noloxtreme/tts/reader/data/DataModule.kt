@@ -5,6 +5,7 @@ import androidx.room.Room
 import com.noloxtreme.tts.reader.domain.ContentRepository
 import com.noloxtreme.tts.reader.domain.DocumentImporter
 import com.noloxtreme.tts.reader.domain.DocumentRepository
+import com.noloxtreme.tts.reader.domain.EpubContentStore
 import com.noloxtreme.tts.reader.domain.ProgressRepository
 import com.noloxtreme.tts.reader.domain.SettingsRepository
 import com.noloxtreme.tts.reader.domain.TimeProvider
@@ -43,6 +44,16 @@ abstract class DataBindingsModule {
     @Binds
     @Singleton
     abstract fun bindDocumentImporter(implementation: SafDocumentImporter): DocumentImporter
+
+    @Binds
+    internal abstract fun bindEpubContentStore(
+        implementation: ZipEpubBookStore
+    ): EpubContentStore
+
+    @Binds
+    internal abstract fun bindEpubSourceLocator(
+        implementation: DocumentEpubLocator
+    ): EpubSourceLocator
 }
 
 @Module

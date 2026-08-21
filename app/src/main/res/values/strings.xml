@@ -74,6 +74,13 @@
     <string name="error_storage_full">Not enough storage to import the book</string>
     <string name="error_database">Could not save the imported book</string>
     <string name="error_cancelled">Import cancelled</string>
+    <string name="open_read_mode">Read this book</string>
+    <string name="close_read_mode">Close reader</string>
+    <string name="table_of_contents">Contents</string>
+    <string name="previous_chapter">Previous chapter</string>
+    <string name="next_chapter">Next chapter</string>
+    <string name="epub_chapter_unavailable_title">Chapter unavailable</string>
+    <string name="epub_chapter_unavailable_body">This chapter could not be displayed.</string>
     <plurals name="books_count">
         <item quantity="one">%1$d book</item>
         <item quantity="other">%1$d books</item>

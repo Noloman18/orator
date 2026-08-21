@@ -29,15 +29,18 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.FastForward
 import androidx.compose.material.icons.outlined.FastRewind
+import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.Replay
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SkipNext
 import androidx.compose.material.icons.outlined.SkipPrevious
+import androidx.compose.material.icons.outlined.Toc
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -99,6 +102,7 @@ import androidx.paging.compose.collectAsLazyPagingItems
 import com.noloxtreme.tts.reader.domain.Document
 import com.noloxtreme.tts.reader.domain.DocumentId
 import com.noloxtreme.tts.reader.domain.DocumentPosition
+import com.noloxtreme.tts.reader.domain.EPUB_MIME_TYPE
 import com.noloxtreme.tts.reader.domain.ImportError
 import com.noloxtreme.tts.reader.domain.ImportSource
 import com.noloxtreme.tts.reader.domain.ImportState
@@ -116,6 +120,9 @@ import com.noloxtreme.tts.reader.ui.LibraryViewModel
 import com.noloxtreme.tts.reader.ui.LibraryLoadState
 import com.noloxtreme.tts.reader.ui.ReaderViewModel
 import com.noloxtreme.tts.reader.ui.ReaderLoadState
+import com.noloxtreme.tts.reader.ui.EpubReaderPane
+import com.noloxtreme.tts.reader.ui.EpubTocSheet
+import com.noloxtreme.tts.reader.ui.lineHeightMultiplier
 import com.noloxtreme.tts.reader.ui.SettingsViewModel
 import com.noloxtreme.tts.reader.ui.theme.OratorTheme
 import kotlinx.coroutines.delay
@@ -492,6 +499,9 @@ private fun ReaderScreen(
     val settings by viewModel.settings.collectAsState()
     val narration by viewModel.narration.collectAsState()
     val sectionTitle by viewModel.sectionTitle.collectAsState()
+    val epubReading by viewModel.epubReading.collectAsState()
+    val inReadMode = epubReading != null
+    var tocSheetVisible by remember(documentId) { mutableStateOf(false) }
     val lazyParagraphs = viewModel.paragraphs.collectAsLazyPagingItems()
     val listState = rememberLazyListState()
     val narrationPosition = narration.positionFor(documentId)
@@ -526,8 +536,8 @@ private fun ReaderScreen(
             }
         }
     }
-    LaunchedEffect(currentParagraphIndex, settings.followSpokenText, followEnabled, lazyParagraphs.itemCount, sectionTitle) {
-        if (settings.followSpokenText && followEnabled && currentParagraphIndex >= 0 && currentParagraphIndex < lazyParagraphs.itemCount) {
+    LaunchedEffect(currentParagraphIndex, settings.followSpokenText, followEnabled, lazyParagraphs.itemCount, sectionTitle, inReadMode) {
+        if (!inReadMode && settings.followSpokenText && followEnabled && currentParagraphIndex >= 0 && currentParagraphIndex < lazyParagraphs.itemCount) {
             val itemIndex = currentParagraphIndex + if (sectionTitle != null) 1 else 0
             if (itemIndex >= 0) {
                 programmaticScroll = true
@@ -539,11 +549,11 @@ private fun ReaderScreen(
             }
         }
     }
-    LaunchedEffect(listState, currentParagraphIndex) {
+    LaunchedEffect(listState, currentParagraphIndex, inReadMode) {
         snapshotFlow {
             listState.isScrollInProgress to listState.layoutInfo.visibleItemsInfo.map { it.key }
         }.collect { (scrolling, visibleKeys) ->
-            if (scrolling && !programmaticScroll && currentParagraphIndex >= 0 &&
+            if (!inReadMode && scrolling && !programmaticScroll && currentParagraphIndex >= 0 &&
                 !visibleKeys.contains("paragraph-$currentParagraphIndex")
             ) {
                 followEnabled = false
@@ -561,6 +571,20 @@ private fun ReaderScreen(
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = stringResource(R.string.back)) }
                 },
                 actions = {
+                    if (document?.mimeType == EPUB_MIME_TYPE) {
+                        if (inReadMode) {
+                            IconButton(onClick = { tocSheetVisible = true }) {
+                                Icon(Icons.Outlined.Toc, contentDescription = stringResource(R.string.table_of_contents))
+                            }
+                            IconButton(onClick = viewModel::exitReadMode) {
+                                Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.close_read_mode))
+                            }
+                        } else {
+                            IconButton(onClick = viewModel::enterReadMode) {
+                                Icon(Icons.Outlined.MenuBook, contentDescription = stringResource(R.string.open_read_mode))
+                            }
+                        }
+                    }
                     IconButton(onClick = onOpenSettings) { Icon(Icons.Outlined.Settings, contentDescription = stringResource(R.string.settings_title)) }
                 }
             )
@@ -664,6 +688,22 @@ private fun ReaderScreen(
                                     }
                                 )
                             }
+                            if (inReadMode) {
+                                val readingState = epubReading
+                                if (readingState != null) {
+                                    EpubReaderPane(
+                                        spineContent = readingState.content,
+                                        unavailable = readingState.unavailable,
+                                        fontSizeSp = settings.readerFontSizeSp,
+                                        lineHeight = settings.lineHeight,
+                                        onPreviousChapter = viewModel::previousSpineItem,
+                                        onNextChapter = viewModel::nextSpineItem,
+                                        onRetry = viewModel::retryCurrentSpine,
+                                        loadImageBytes = viewModel::imageBytes,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            } else {
                             LazyColumn(
                                 state = listState,
                                 modifier = Modifier.fillMaxWidth().weight(1f),
@@ -691,10 +731,11 @@ private fun ReaderScreen(
                                             lineHeight = settings.lineHeight
                                         )
                                     }
-                                }
-                            }
+                                 }
+                             }
+                             }
                         }
-                        if (!followEnabled && currentParagraphIndex >= 0) {
+                        if (!followEnabled && currentParagraphIndex >= 0 && !inReadMode) {
                             AssistChip(
                                 onClick = {
                                     followEnabled = true
@@ -719,6 +760,18 @@ private fun ReaderScreen(
             }
         }
     }
+    val tocReadingState = epubReading
+    if (tocSheetVisible && tocReadingState != null) {
+        EpubTocSheet(
+            entries = tocReadingState.toc,
+            currentSpineIndex = tocReadingState.currentSpineIndex,
+            onSelect = { entry ->
+                tocSheetVisible = false
+                viewModel.openTocEntry(entry)
+            },
+            onDismiss = { tocSheetVisible = false }
+        )
+    }
 }
 
 @Composable
@@ -728,16 +781,12 @@ private fun ParagraphText(
     fontSizeSp: Int,
     lineHeight: LineHeightPreference
 ) {
-    val lineHeightMultiplier = when (lineHeight) {
-        LineHeightPreference.COMPACT -> 1.35f
-        LineHeightPreference.COMFORTABLE -> 1.55f
-        LineHeightPreference.SPACIOUS -> 1.8f
-    }
+    val multiplier = lineHeightMultiplier(lineHeight)
     Text(
         text = highlightedText(text, activeRange),
         style = MaterialTheme.typography.bodyLarge.copy(
             fontSize = fontSizeSp.coerceIn(14, 32).sp,
-            lineHeight = (fontSizeSp.coerceIn(14, 32) * lineHeightMultiplier).sp
+            lineHeight = (fontSizeSp.coerceIn(14, 32) * multiplier).sp
         )
     )
 }

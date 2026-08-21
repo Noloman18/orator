@@ -13,9 +13,10 @@ import org.w3c.dom.Element
 import org.xml.sax.InputSource
 import javax.xml.parsers.DocumentBuilderFactory
 
-private const val MAX_EPUB_ENTRIES = 10_000
-private const val MAX_EPUB_ENTRY_BYTES = 25L * 1024L * 1024L
-private const val MAX_EPUB_TOTAL_BYTES = 250L * 1024L * 1024L
+internal const val MAX_EPUB_ENTRIES = 10_000
+internal const val MAX_EPUB_ENTRY_BYTES = 25L * 1024L * 1024L
+internal const val MAX_EPUB_TOTAL_BYTES = 250L * 1024L * 1024L
+internal const val NCX_MEDIA_TYPE = "application/x-dtbncx+xml"
 
 internal class EpubParser : BookParser {
     override val extension: String = "epub"
@@ -81,22 +82,23 @@ internal class EpubParser : BookParser {
     }
 }
 
-private class ParsedEpub(
+internal class ParsedEpub(
     val zip: ZipFile,
     val metadata: ParsedMetadata,
     val spine: List<SpineItem>,
-    val navLabels: Map<String, String>
+    val navLabels: Map<String, String>,
+    val ncxHref: String?
 ) : AutoCloseable {
     override fun close() = zip.close()
 }
 
-private data class SpineItem(
+internal data class SpineItem(
     val href: String,
     val mediaType: String,
     val properties: String?
 )
 
-private fun openBook(file: File, displayName: String): ParsedEpub {
+internal fun openBook(file: File, displayName: String): ParsedEpub {
     val zip = try {
         ZipFile(file)
     } catch (_: Throwable) {
@@ -156,6 +158,11 @@ private fun openBook(file: File, displayName: String): ParsedEpub {
             it.mediaType == "application/xhtml+xml" || it.mediaType == "text/html"
         }
         if (spine.isEmpty()) throw ImportException(ImportError.NO_READABLE_TEXT)
+        val spineTocIdref = spineElement.getAttribute("toc")
+        val ncxHref = manifest[spineTocIdref]?.href
+            ?: manifest.values.firstOrNull { item ->
+                item.mediaType.equals(NCX_MEDIA_TYPE, ignoreCase = true)
+            }?.href
         val title = opf.getElementsByTagNameNS("*", "title").item(0)
             ?.textContent?.trim()
             ?.takeIf { it.isNotBlank() }
@@ -174,7 +181,8 @@ private fun openBook(file: File, displayName: String): ParsedEpub {
                 languageTag = language
             ),
             spine = spine,
-            navLabels = navLabels
+            navLabels = navLabels,
+            ncxHref = ncxHref
         )
     } catch (error: Throwable) {
         zip.close()
@@ -218,13 +226,13 @@ private fun navLabelsFor(
     return labels
 }
 
-private fun safeZipPathOrNull(base: String, href: String): String? = try {
+internal fun safeZipPathOrNull(base: String, href: String): String? = try {
     safeZipPath(base, href)
 } catch (_: Throwable) {
     null
 }
 
-private fun readEntry(zip: ZipFile, entry: java.util.zip.ZipEntry): ByteArray {
+internal fun readEntry(zip: ZipFile, entry: java.util.zip.ZipEntry): ByteArray {
     if (entry.isDirectory || entry.size > MAX_EPUB_ENTRY_BYTES) {
         throw ImportException(ImportError.EPUB_LIMIT_EXCEEDED)
     }
@@ -245,7 +253,7 @@ private fun readEntry(zip: ZipFile, entry: java.util.zip.ZipEntry): ByteArray {
     return output.toByteArray()
 }
 
-private fun parseXml(bytes: ByteArray): org.w3c.dom.Document {
+internal fun parseXml(bytes: ByteArray): org.w3c.dom.Document {
     if (containsDoctype(bytes)) {
         throw ImportException(ImportError.MALFORMED_DOCUMENT)
     }
@@ -269,7 +277,7 @@ private fun parseXml(bytes: ByteArray): org.w3c.dom.Document {
     }
 }
 
-private fun containsDoctype(bytes: ByteArray): Boolean {
+internal fun containsDoctype(bytes: ByteArray): Boolean {
     val text = when {
         bytes.size >= 2 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xFE.toByte() ->
             String(bytes, 2, bytes.size - 2, StandardCharsets.UTF_16LE)
@@ -284,7 +292,7 @@ private fun containsDoctype(bytes: ByteArray): Boolean {
     return text.contains("<!DOCTYPE", ignoreCase = true)
 }
 
-private fun safeZipPath(base: String, href: String): String {
+internal fun safeZipPath(base: String, href: String): String {
     val decoded = URLDecoder.decode(href.substringBefore('#'), "UTF-8")
         .replace(Char(92), '/')
     val components = (if (base.isBlank()) decoded else "$base/$decoded")

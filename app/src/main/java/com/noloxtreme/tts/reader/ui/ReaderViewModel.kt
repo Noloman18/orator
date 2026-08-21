@@ -8,6 +8,9 @@ import com.noloxtreme.tts.reader.domain.ContentRepository
 import com.noloxtreme.tts.reader.domain.Document
 import com.noloxtreme.tts.reader.domain.DocumentId
 import com.noloxtreme.tts.reader.domain.DocumentPosition
+import com.noloxtreme.tts.reader.domain.EPUB_MIME_TYPE
+import com.noloxtreme.tts.reader.domain.EpubSpineContent
+import com.noloxtreme.tts.reader.domain.EpubTocEntry
 import com.noloxtreme.tts.reader.domain.FAST_JUMP_SENTENCE_COUNT
 import com.noloxtreme.tts.reader.domain.NarrationCommand
 import com.noloxtreme.tts.reader.domain.NarrationController
@@ -15,6 +18,10 @@ import com.noloxtreme.tts.reader.domain.NarrationState
 import com.noloxtreme.tts.reader.domain.OratorSettings
 import com.noloxtreme.tts.reader.domain.Paragraph
 import com.noloxtreme.tts.reader.domain.ReadingProgress
+import com.noloxtreme.tts.reader.domain.usecase.LoadImageResource
+import com.noloxtreme.tts.reader.domain.usecase.LoadSpineContent
+import com.noloxtreme.tts.reader.domain.usecase.LoadSpineCount
+import com.noloxtreme.tts.reader.domain.usecase.LoadTableOfContents
 import com.noloxtreme.tts.reader.domain.usecase.ReaderContent
 import com.noloxtreme.tts.reader.domain.usecase.ObserveReaderContent
 import com.noloxtreme.tts.reader.domain.usecase.ObserveReadingProgress
@@ -38,6 +45,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -46,6 +54,16 @@ sealed interface ReaderLoadState {
     data object Ready : ReaderLoadState
     data object MissingDocument : ReaderLoadState
 }
+
+/** Visual read-mode state for EPUB documents; null while narration mode is active. */
+data class EpubReadingState(
+    val toc: List<EpubTocEntry>,
+    val spineCount: Int,
+    val currentSpineIndex: Int,
+    val content: EpubSpineContent?,
+    val loadingContent: Boolean,
+    val unavailable: Boolean
+)
 
 @HiltViewModel
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -60,10 +78,18 @@ class ReaderViewModel @Inject constructor(
     private val skipSentence: SkipSentence,
     private val restartCompletedDocument: RestartCompletedDocument,
     private val contentRepository: ContentRepository,
+    private val loadTableOfContents: LoadTableOfContents,
+    private val loadSpineContent: LoadSpineContent,
+    private val loadSpineCount: LoadSpineCount,
+    private val loadImageResource: LoadImageResource,
     val narrationController: NarrationController
 ) : ViewModel() {
     private val pageRequest = MutableStateFlow<DocumentId?>(null)
     private val initialParagraph = MutableStateFlow(0)
+    private val mutableEpubReading = MutableStateFlow<EpubReadingState?>(null)
+    private val imageCache = java.util.concurrent.ConcurrentHashMap<String, ByteArray?>()
+
+    val epubReading: StateFlow<EpubReadingState?> = mutableEpubReading.asStateFlow()
 
     private val readerContent = pageRequest.flatMapLatest { id ->
         if (id == null) emptyFlow()
@@ -172,6 +198,103 @@ class ReaderViewModel @Inject constructor(
                 )
             )
         }
+    }
+
+    fun enterReadMode() {
+        if (mutableEpubReading.value != null) return
+        val id = pageRequest.value ?: return
+        if (document.value?.mimeType != EPUB_MIME_TYPE) return
+        viewModelScope.launch {
+            val startSpineIndex = currentSpineIndexFor(id)
+            mutableEpubReading.value = EpubReadingState(
+                toc = emptyList(),
+                spineCount = 0,
+                currentSpineIndex = startSpineIndex,
+                content = null,
+                loadingContent = true,
+                unavailable = false
+            )
+            val toc = runCatching { loadTableOfContents.execute(id) }.getOrDefault(emptyList())
+            val spineCount = maxOf(
+                toc.maxOfOrNull { it.spineIndex }?.plus(1) ?: 0,
+                runCatching { loadSpineCount.execute(id) }.getOrDefault(0)
+            )
+            if (pageRequest.value != id || mutableEpubReading.value == null) return@launch
+            mutableEpubReading.update {
+                it?.copy(toc = toc, spineCount = spineCount)
+            }
+            openSpineItem(startSpineIndex)
+        }
+    }
+
+    fun exitReadMode() {
+        mutableEpubReading.value = null
+    }
+
+    fun retryCurrentSpine() {
+        mutableEpubReading.value?.let { state ->
+            openSpineItem(state.currentSpineIndex)
+        }
+    }
+
+    fun openTocEntry(entry: EpubTocEntry) {
+        val id = pageRequest.value ?: return
+        openSpineItem(entry.spineIndex)
+        if (narrationController.state.value.documentIdOrNull() == id) {
+            viewModelScope.launch {
+                val section = contentRepository.section(id, entry.spineIndex) ?: return@launch
+                seekTo(
+                    DocumentPosition(
+                        paragraphIndex = section.firstParagraphIndex,
+                        offsetInParagraph = 0,
+                        absoluteOffset = section.absoluteStart
+                    )
+                )
+            }
+        }
+    }
+
+    fun nextSpineItem() {
+        val state = mutableEpubReading.value ?: return
+        val target = state.currentSpineIndex + 1
+        if (state.spineCount > 0 && target < state.spineCount) openSpineItem(target)
+    }
+
+    fun previousSpineItem() {
+        val state = mutableEpubReading.value ?: return
+        val target = state.currentSpineIndex - 1
+        if (target >= 0) openSpineItem(target)
+    }
+
+    suspend fun imageBytes(resourcePath: String): ByteArray? {
+        val id = pageRequest.value ?: return null
+        val cacheKey = id.value + "/" + resourcePath
+        if (imageCache.containsKey(cacheKey)) return imageCache[cacheKey]
+        val bytes = runCatching { loadImageResource.execute(id, resourcePath) }.getOrNull()
+        imageCache[cacheKey] = bytes
+        return bytes
+    }
+
+    private fun openSpineItem(spineIndex: Int) {
+        val id = pageRequest.value ?: return
+        mutableEpubReading.update { it?.copy(currentSpineIndex = spineIndex, loadingContent = true) }
+        viewModelScope.launch {
+            val content = runCatching { loadSpineContent.execute(id, spineIndex) }.getOrNull()
+            if (pageRequest.value != id || mutableEpubReading.value == null) return@launch
+            mutableEpubReading.update {
+                it?.takeIf { state -> state.currentSpineIndex == spineIndex }
+                    ?.copy(content = content, loadingContent = false, unavailable = content == null)
+            }
+        }
+    }
+
+    private suspend fun currentSpineIndexFor(id: DocumentId): Int {
+        val narratedIndex = narrationController.state.value.paragraphIndexOrNull()
+            ?.takeIf { narrationController.state.value.documentIdOrNull() == id }
+        val progressIndex = narratedIndex
+            ?: observeReadingProgress.execute(id).first()?.position?.paragraphIndex
+            ?: return 0
+        return contentRepository.paragraph(id, progressIndex)?.sectionIndex ?: 0
     }
 }
 
