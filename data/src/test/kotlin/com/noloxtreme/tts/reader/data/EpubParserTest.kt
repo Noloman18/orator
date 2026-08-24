@@ -53,13 +53,15 @@ class EpubParserTest {
         title: String = "Test Book",
         language: String = "en-US",
         spineRefs: List<String>,
-        manifest: String
+        manifest: String,
+        metadataExtra: String = ""
     ): Pair<String, String> = "OEBPS/content.opf" to """
         <?xml version="1.0"?>
         <package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="uid">
           <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
             <dc:title>$title</dc:title>
             <dc:language>$language</dc:language>
+            $metadataExtra
           </metadata>
           <manifest>
             $manifest
@@ -278,6 +280,95 @@ class EpubParserTest {
         )
 
         assertImportError(ImportError.NO_READABLE_TEXT) { parser.readMetadata(file, "book.epub") }
+    }
+
+    @Test
+    fun coverImagePropertyPrependsSyntheticSpineItem() {
+        val file = buildEpub(
+            "mimetype" to "application/epub+zip",
+            containerXml(),
+            opf2(
+                spineRefs = listOf("c1"),
+                manifest = """
+                    <item id="cov" href="images/cover.jpg" media-type="image/jpeg" properties="cover-image"/>
+                    <item id="c1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
+                """.trimIndent()
+            ),
+            "OEBPS/images/cover.jpg" to "cover bytes",
+            "OEBPS/chapter1.xhtml" to xhtml("<p>Body.</p>")
+        )
+
+        openBook(file, "book.epub").use { book ->
+            assertEquals(2, book.spine.size)
+            assertTrue(book.spine[0].isCover)
+            assertEquals("OEBPS/images/cover.jpg", book.spine[0].href)
+            assertEquals(false, book.spine[1].isCover)
+        }
+        assertEquals(listOf("Body."), blocks(file).map { it.text })
+        assertEquals(listOf(0), blocks(file).map { it.sectionIndex })
+    }
+
+    @Test
+    fun metaNameCoverIsUsedAsCoverFallback() {
+        val file = buildEpub(
+            "mimetype" to "application/epub+zip",
+            containerXml(),
+            opf2(
+                spineRefs = listOf("c1"),
+                metadataExtra = "<meta name=\"cover\" content=\"cover-image\"/>",
+                manifest = """
+                    <item id="cover-image" href="images/cover.png" media-type="image/png"/>
+                    <item id="c1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
+                """.trimIndent()
+            ),
+            "OEBPS/images/cover.png" to "cover bytes",
+            "OEBPS/chapter1.xhtml" to xhtml("<p>Body.</p>")
+        )
+
+        openBook(file, "book.epub").use { book ->
+            assertEquals(2, book.spine.size)
+            assertTrue(book.spine[0].isCover)
+            assertEquals("OEBPS/images/cover.png", book.spine[0].href)
+        }
+    }
+
+    @Test
+    fun metaNameCoverHrefIsResolvedRelativeToOpf() {
+        val file = buildEpub(
+            "mimetype" to "application/epub+zip",
+            containerXml(),
+            opf2(
+                spineRefs = listOf("c1"),
+                metadataExtra = "<meta name=\"cover\" content=\"images/cover.jpg\"/>",
+                manifest = "<item id=\"c1\" href=\"chapter1.xhtml\" media-type=\"application/xhtml+xml\"/>"
+            ),
+            "OEBPS/images/cover.jpg" to "cover bytes",
+            "OEBPS/chapter1.xhtml" to xhtml("<p>Body.</p>")
+        )
+
+        openBook(file, "book.epub").use { book ->
+            assertEquals(2, book.spine.size)
+            assertTrue(book.spine[0].isCover)
+            assertEquals("OEBPS/images/cover.jpg", book.spine[0].href)
+        }
+    }
+
+    @Test
+    fun bookWithoutDeclaredCoverKeepsSpineUntouched() {
+        val file = buildEpub(
+            "mimetype" to "application/epub+zip",
+            containerXml(),
+            opf2(
+                spineRefs = listOf("c1"),
+                manifest = "<item id=\"c1\" href=\"chapter1.xhtml\" media-type=\"application/xhtml+xml\"/>"
+            ),
+            "OEBPS/chapter1.xhtml" to xhtml("<p>Body.</p>")
+        )
+
+        openBook(file, "book.epub").use { book ->
+            assertEquals(1, book.spine.size)
+            assertEquals(false, book.spine[0].isCover)
+        }
     }
 
     @Test

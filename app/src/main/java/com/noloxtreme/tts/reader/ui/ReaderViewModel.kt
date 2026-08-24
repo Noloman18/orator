@@ -18,6 +18,7 @@ import com.noloxtreme.tts.reader.domain.NarrationState
 import com.noloxtreme.tts.reader.domain.OratorSettings
 import com.noloxtreme.tts.reader.domain.Paragraph
 import com.noloxtreme.tts.reader.domain.ReadingProgress
+import com.noloxtreme.tts.reader.domain.usecase.LoadCoverPresence
 import com.noloxtreme.tts.reader.domain.usecase.LoadImageResource
 import com.noloxtreme.tts.reader.domain.usecase.LoadSpineContent
 import com.noloxtreme.tts.reader.domain.usecase.LoadSpineCount
@@ -62,7 +63,9 @@ data class EpubReadingState(
     val currentSpineIndex: Int,
     val content: EpubSpineContent?,
     val loadingContent: Boolean,
-    val unavailable: Boolean
+    val unavailable: Boolean,
+    /** Number of spine slots taken by a synthesized cover page at index 0. */
+    val coverOffset: Int
 )
 
 @HiltViewModel
@@ -81,6 +84,7 @@ class ReaderViewModel @Inject constructor(
     private val loadTableOfContents: LoadTableOfContents,
     private val loadSpineContent: LoadSpineContent,
     private val loadSpineCount: LoadSpineCount,
+    private val loadCoverPresence: LoadCoverPresence,
     private val loadImageResource: LoadImageResource,
     val narrationController: NarrationController
 ) : ViewModel() {
@@ -90,6 +94,25 @@ class ReaderViewModel @Inject constructor(
     private val imageCache = java.util.concurrent.ConcurrentHashMap<String, ByteArray?>()
 
     val epubReading: StateFlow<EpubReadingState?> = mutableEpubReading.asStateFlow()
+
+    private val narrationTransport = NarrationTransport(
+        rewindAction = ::rewind,
+        previousSentenceAction = ::previousSentence,
+        nextSentenceAction = ::nextSentence,
+        fastForwardAction = ::fastForward
+    )
+    private val chapterTransport = ChapterTransport(
+        previousChapter = ::previousSpineItem,
+        nextChapter = ::nextSpineItem
+    )
+
+    /**
+     * The transport strategy matching the current mode: chapter navigation
+     * while the visual read mode is open, sentence skipping otherwise.
+     */
+    val transport: StateFlow<ReaderTransport> = mutableEpubReading
+        .map { reading -> if (reading == null) narrationTransport else chapterTransport }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), narrationTransport)
 
     private val readerContent = pageRequest.flatMapLatest { id ->
         if (id == null) emptyFlow()
@@ -205,14 +228,16 @@ class ReaderViewModel @Inject constructor(
         val id = pageRequest.value ?: return
         if (document.value?.mimeType != EPUB_MIME_TYPE) return
         viewModelScope.launch {
-            val startSpineIndex = currentSpineIndexFor(id)
+            val coverOffset = if (runCatching { loadCoverPresence.execute(id) }.getOrDefault(false)) 1 else 0
+            val startSpineIndex = currentSpineIndexFor(id, coverOffset)
             mutableEpubReading.value = EpubReadingState(
                 toc = emptyList(),
                 spineCount = 0,
                 currentSpineIndex = startSpineIndex,
                 content = null,
                 loadingContent = true,
-                unavailable = false
+                unavailable = false,
+                coverOffset = coverOffset
             )
             val toc = runCatching { loadTableOfContents.execute(id) }.getOrDefault(emptyList())
             val spineCount = maxOf(
@@ -240,9 +265,11 @@ class ReaderViewModel @Inject constructor(
     fun openTocEntry(entry: EpubTocEntry) {
         val id = pageRequest.value ?: return
         openSpineItem(entry.spineIndex)
-        if (narrationController.state.value.documentIdOrNull() == id) {
+        val readingState = mutableEpubReading.value
+        if (narrationController.state.value.documentIdOrNull() == id && readingState != null) {
             viewModelScope.launch {
-                val section = contentRepository.section(id, entry.spineIndex) ?: return@launch
+                val section = contentRepository.section(id, entry.spineIndex - readingState.coverOffset)
+                    ?: return@launch
                 seekTo(
                     DocumentPosition(
                         paragraphIndex = section.firstParagraphIndex,
@@ -288,13 +315,18 @@ class ReaderViewModel @Inject constructor(
         }
     }
 
-    private suspend fun currentSpineIndexFor(id: DocumentId): Int {
+    /**
+     * The read-mode spine index matching the current narration position. Real
+     * section indices are shifted by the synthesized cover page when the book
+     * has one, so a fresh book (no progress) lands on the cover at index 0.
+     */
+    private suspend fun currentSpineIndexFor(id: DocumentId, coverOffset: Int): Int {
         val narratedIndex = narrationController.state.value.paragraphIndexOrNull()
             ?.takeIf { narrationController.state.value.documentIdOrNull() == id }
         val progressIndex = narratedIndex
             ?: observeReadingProgress.execute(id).first()?.position?.paragraphIndex
             ?: return 0
-        return contentRepository.paragraph(id, progressIndex)?.sectionIndex ?: 0
+        return contentRepository.paragraph(id, progressIndex)?.sectionIndex?.plus(coverOffset) ?: 0
     }
 }
 

@@ -82,10 +82,17 @@ data class EpubTocEntry(
     }
 }
 
-/** Read-only access to the visual content of an imported EPUB document. */
+/**
+ * Read-only access to the visual content of an imported EPUB document. Spine
+ * indices cover the book's declared cover when it has one: a synthesized cover
+ * page occupies index 0 and the real spine items start at index 1.
+ */
 interface EpubContentStore {
     suspend fun tableOfContents(id: DocumentId): List<EpubTocEntry>
     suspend fun spineContent(id: DocumentId, spineIndex: Int): EpubSpineContent?
     suspend fun imageResource(id: DocumentId, resourcePath: String): ByteArray?
     suspend fun spineCount(id: DocumentId): Int
+
+    /** Whether a synthesized cover page is prepended to the spine at index 0. */
+    suspend fun hasCoverPage(id: DocumentId): Boolean
 }

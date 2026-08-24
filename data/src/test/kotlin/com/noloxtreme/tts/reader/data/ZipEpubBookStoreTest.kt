@@ -3,6 +3,7 @@ package com.noloxtreme.tts.reader.data
 import com.noloxtreme.tts.reader.domain.DocumentId
 import com.noloxtreme.tts.reader.domain.EpubBlock
 import com.noloxtreme.tts.reader.domain.EpubRun
+import com.noloxtreme.tts.reader.domain.EpubSpineContent
 import com.noloxtreme.tts.reader.domain.EpubTocEntry
 import java.io.File
 import kotlinx.coroutines.runBlocking
@@ -191,6 +192,85 @@ class ZipEpubBookStoreTest {
 
         assertNull(store(file).imageResource(DocumentId("doc"), "../../etc/passwd"))
         assertNull(store(file).imageResource(DocumentId("doc"), "missing.png"))
+    }
+
+    private fun coverEpub(): File {
+        val coverBytes = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47)
+        val nav = """
+            <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+            <body>
+              <nav epub:type="toc"><ol>
+                <li><a href="chapter1.xhtml">Part One</a></li>
+                <li><a href="chapter2.xhtml">Part Two</a></li>
+              </ol></nav>
+            </body>
+            </html>
+        """.trim()
+        return factory.buildEpub(
+            "mimetype" to "application/epub+zip",
+            factory.containerXml(),
+            factory.opf3(
+                manifest = """
+                    <item id="cov" href="images/cover.jpg" media-type="image/jpeg" properties="cover-image"/>
+                    <item id="c1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
+                    <item id="c2" href="chapter2.xhtml" media-type="application/xhtml+xml"/>
+                    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+                """.trimIndent(),
+                spineRefs = listOf("c1", "c2", "nav")
+            ),
+            "OEBPS/nav.xhtml" to nav,
+            "OEBPS/images/cover.jpg" to coverBytes,
+            "OEBPS/chapter1.xhtml" to factory.xhtml("<h1>Part One</h1><p>Hello.</p>"),
+            "OEBPS/chapter2.xhtml" to factory.xhtml("<h1>Part Two</h1><p>Bye.</p>")
+        )
+    }
+
+    @Test
+    fun coverIsPrependedAsSynthesizedSpineItem() = runBlocking {
+        val file = coverEpub()
+        val store = store(file)
+
+        assertTrue(store.hasCoverPage(DocumentId("doc")))
+        assertEquals(4, store.spineCount(DocumentId("doc")))
+        assertEquals(
+            EpubSpineContent(
+                spineIndex = 0,
+                title = null,
+                blocks = listOf(EpubBlock.Image("OEBPS/images/cover.jpg", null))
+            ),
+            store.spineContent(DocumentId("doc"), 0)
+        )
+        assertEquals(
+            "Part One",
+            store.spineContent(DocumentId("doc"), 1)?.title
+        )
+        assertEquals(
+            listOf(
+                EpubTocEntry("Part One", 1, 0),
+                EpubTocEntry("Part Two", 2, 0)
+            ),
+            store.tableOfContents(DocumentId("doc"))
+        )
+        assertEquals(
+            byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47).toList(),
+            store.imageResource(DocumentId("doc"), "OEBPS/images/cover.jpg")!!.toList()
+        )
+    }
+
+    @Test
+    fun bookWithoutCoverHasNoCoverPage() = runBlocking {
+        val store = store(navEpub())
+
+        assertEquals(false, store.hasCoverPage(DocumentId("doc")))
+        assertEquals(4, store.spineCount(DocumentId("doc")))
+        assertEquals(
+            listOf(
+                EpubTocEntry("Part One", 0, 0),
+                EpubTocEntry("Section 1.1", 1, 1),
+                EpubTocEntry("Part Two", 2, 0)
+            ),
+            store.tableOfContents(DocumentId("doc"))
+        )
     }
 
     @Test

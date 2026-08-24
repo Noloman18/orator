@@ -35,7 +35,9 @@ internal class EpubParser : BookParser {
     ) {
         openBook(file, file.name).use { book ->
             var totalRead = 0L
-            for ((index, item) in book.spine.withIndex()) {
+            var sectionIndex = 0
+            for (item in book.spine) {
+                if (item.isCover) continue
                 val entry = book.zip.getEntry(item.href)
                     ?: throw ImportException(ImportError.MALFORMED_DOCUMENT)
                 val bytes = readEntry(book.zip, entry)
@@ -56,15 +58,16 @@ internal class EpubParser : BookParser {
                 for (block in document.select("h1,h2,h3,h4,h5,h6,p,li,blockquote,pre")) {
                     val text = block.text().trim()
                     if (text.isBlank()) continue
-                    consumer(ParsedBlock(text, index, sectionTitle))
+                    consumer(ParsedBlock(text, sectionIndex, sectionTitle))
                     emitted = true
                 }
                 if (!emitted) {
                     val bodyText = document.body()?.text()?.trim()
                     if (!bodyText.isNullOrBlank()) {
-                        consumer(ParsedBlock(bodyText, index, sectionTitle))
+                        consumer(ParsedBlock(bodyText, sectionIndex, sectionTitle))
                     }
                 }
+                sectionIndex += 1
             }
         }
     }
@@ -95,7 +98,8 @@ internal class ParsedEpub(
 internal data class SpineItem(
     val href: String,
     val mediaType: String,
-    val properties: String?
+    val properties: String?,
+    val isCover: Boolean = false
 )
 
 internal fun openBook(file: File, displayName: String): ParsedEpub {
@@ -158,6 +162,14 @@ internal fun openBook(file: File, displayName: String): ParsedEpub {
             it.mediaType == "application/xhtml+xml" || it.mediaType == "text/html"
         }
         if (spine.isEmpty()) throw ImportException(ImportError.NO_READABLE_TEXT)
+        val coverHref = coverImageHref(manifest, opf, basePath)
+        val spineWithCover = if (coverHref != null) {
+            listOf(
+                SpineItem(href = coverHref, mediaType = "image", properties = null, isCover = true)
+            ) + spine
+        } else {
+            spine
+        }
         val spineTocIdref = spineElement.getAttribute("toc")
         val ncxHref = manifest[spineTocIdref]?.href
             ?: manifest.values.firstOrNull { item ->
@@ -180,7 +192,7 @@ internal fun openBook(file: File, displayName: String): ParsedEpub {
                 mimeType = "application/epub+zip",
                 languageTag = language
             ),
-            spine = spine,
+            spine = spineWithCover,
             navLabels = navLabels,
             ncxHref = ncxHref
         )
@@ -190,6 +202,39 @@ internal fun openBook(file: File, displayName: String): ParsedEpub {
         throw ImportException(ImportError.MALFORMED_DOCUMENT)
     }
 }
+
+/**
+ * Resolves the book's declared cover image to its root-relative zip path.
+ * EPUB 3 marks it with `properties="cover-image"`; EPUB 2 references the cover
+ * manifest item (or its href) through `<meta name="cover">`. Books without a
+ * declared image cover have no synthesized cover page.
+ */
+private fun coverImageHref(
+    manifest: Map<String, SpineItem>,
+    opf: org.w3c.dom.Document,
+    basePath: String
+): String? {
+    manifest.values.firstOrNull { item ->
+        item.mediaType.startsWith("image/") &&
+            item.properties?.split(' ')?.any { it.equals("cover-image", ignoreCase = true) } == true
+    }?.let { return it.href }
+    val metas = opf.getElementsByTagNameNS("*", "meta")
+    for (index in 0 until metas.length) {
+        val meta = metas.item(index) as? Element ?: continue
+        if (!meta.getAttribute("name").equals("cover", ignoreCase = true)) continue
+        val content = meta.getAttribute("content").trim()
+        if (content.isBlank()) continue
+        manifest[content]?.takeIf { it.mediaType.startsWith("image/") }?.let { return it.href }
+        val asPath = runCatching { safeZipPath(basePath, content) }.getOrNull()
+            ?: continue
+        if (IMAGE_EXTENSIONS.contains(asPath.substringAfterLast('.').lowercase())) {
+            return asPath
+        }
+    }
+    return null
+}
+
+private val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "avif")
 
 private fun navLabelsFor(
     zip: ZipFile,

@@ -120,6 +120,7 @@ import com.noloxtreme.tts.reader.ui.LibraryViewModel
 import com.noloxtreme.tts.reader.ui.LibraryLoadState
 import com.noloxtreme.tts.reader.ui.ReaderViewModel
 import com.noloxtreme.tts.reader.ui.ReaderLoadState
+import com.noloxtreme.tts.reader.ui.ReaderTransport
 import com.noloxtreme.tts.reader.ui.EpubReaderPane
 import com.noloxtreme.tts.reader.ui.EpubTocSheet
 import com.noloxtreme.tts.reader.ui.lineHeightMultiplier
@@ -500,6 +501,7 @@ private fun ReaderScreen(
     val narration by viewModel.narration.collectAsState()
     val sectionTitle by viewModel.sectionTitle.collectAsState()
     val epubReading by viewModel.epubReading.collectAsState()
+    val transport by viewModel.transport.collectAsState()
     val inReadMode = epubReading != null
     var tocSheetVisible by remember(documentId) { mutableStateOf(false) }
     val lazyParagraphs = viewModel.paragraphs.collectAsLazyPagingItems()
@@ -594,8 +596,8 @@ private fun ReaderScreen(
                 ReaderControls(
                     narration = narration,
                     playing = playing,
-                    onRewind = viewModel::rewind,
-                    onPrevious = viewModel::previousSentence,
+                    transport = transport,
+                    reading = inReadMode,
                     onPlay = {
                         if (!playing) {
                             val serviceIntent = android.content.Intent(context, NarrationService::class.java)
@@ -606,9 +608,7 @@ private fun ReaderScreen(
                             context.startService(serviceIntent)
                         }
                         if (narration is NarrationState.Completed) viewModel.restart() else if (playing) viewModel.pause() else viewModel.play()
-                    },
-                    onNext = viewModel::nextSentence,
-                    onFastForward = viewModel::fastForward
+                    }
                 )
             }
         }
@@ -696,8 +696,6 @@ private fun ReaderScreen(
                                         unavailable = readingState.unavailable,
                                         fontSizeSp = settings.readerFontSizeSp,
                                         lineHeight = settings.lineHeight,
-                                        onPreviousChapter = viewModel::previousSpineItem,
-                                        onNextChapter = viewModel::nextSpineItem,
                                         onRetry = viewModel::retryCurrentSpine,
                                         loadImageBytes = viewModel::imageBytes,
                                         modifier = Modifier.weight(1f)
@@ -817,11 +815,9 @@ private fun highlightedText(text: String, range: SpokenRange?): AnnotatedString 
 private fun ReaderControls(
     narration: NarrationState,
     playing: Boolean,
-    onRewind: () -> Unit,
-    onPrevious: () -> Unit,
-    onPlay: () -> Unit,
-    onNext: () -> Unit,
-    onFastForward: () -> Unit
+    transport: ReaderTransport,
+    reading: Boolean,
+    onPlay: () -> Unit
 ) {
     Surface(
         modifier = Modifier
@@ -836,13 +832,22 @@ private fun ReaderControls(
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onRewind) {
+            IconButton(onClick = transport::rewind) {
                 Icon(
                     Icons.Outlined.FastRewind,
-                    contentDescription = stringResource(R.string.rewind)
+                    contentDescription = stringResource(
+                        if (reading) R.string.previous_chapter else R.string.rewind
+                    )
                 )
             }
-            IconButton(onClick = onPrevious) { Icon(Icons.Outlined.SkipPrevious, contentDescription = stringResource(R.string.previous_sentence)) }
+            IconButton(onClick = transport::previous) {
+                Icon(
+                    Icons.Outlined.SkipPrevious,
+                    contentDescription = stringResource(
+                        if (reading) R.string.previous_chapter else R.string.previous_sentence
+                    )
+                )
+            }
             IconButton(onClick = onPlay, modifier = Modifier.size(56.dp)) {
                 Icon(
                     imageVector = when {
@@ -859,11 +864,20 @@ private fun ReaderControls(
                     tint = MaterialTheme.colorScheme.primary
                 )
             }
-            IconButton(onClick = onNext) { Icon(Icons.Outlined.SkipNext, contentDescription = stringResource(R.string.next_sentence)) }
-            IconButton(onClick = onFastForward) {
+            IconButton(onClick = transport::next) {
+                Icon(
+                    Icons.Outlined.SkipNext,
+                    contentDescription = stringResource(
+                        if (reading) R.string.next_chapter else R.string.next_sentence
+                    )
+                )
+            }
+            IconButton(onClick = transport::fastForward) {
                 Icon(
                     Icons.Outlined.FastForward,
-                    contentDescription = stringResource(R.string.fast_forward)
+                    contentDescription = stringResource(
+                        if (reading) R.string.next_chapter else R.string.fast_forward
+                    )
                 )
             }
         }

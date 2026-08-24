@@ -67,8 +67,6 @@ fun EpubReaderPane(
     unavailable: Boolean,
     fontSizeSp: Int,
     lineHeight: LineHeightPreference,
-    onPreviousChapter: () -> Unit,
-    onNextChapter: () -> Unit,
     onRetry: () -> Unit,
     loadImageBytes: suspend (String) -> ByteArray?,
     modifier: Modifier = Modifier
@@ -94,12 +92,6 @@ fun EpubReaderPane(
             ) {
                 itemsIndexed(spineContent.blocks, key = { index, _ -> index }) { _, block ->
                     EpubBlockView(block, fontSizeSp, lineHeight, loadImageBytes)
-                }
-                item {
-                    ChapterFooter(
-                        onPreviousChapter = onPreviousChapter,
-                        onNextChapter = onNextChapter
-                    )
                 }
             }
         }
@@ -188,24 +180,6 @@ private fun EpubImageView(
             contentScale = ContentScale.FillWidth,
             modifier = Modifier.fillMaxWidth()
         )
-    }
-}
-
-@Composable
-private fun ChapterFooter(
-    onPreviousChapter: () -> Unit,
-    onNextChapter: () -> Unit
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly
-    ) {
-        TextButton(onClick = onPreviousChapter) {
-            Text(stringResource(R.string.previous_chapter))
-        }
-        TextButton(onClick = onNextChapter) {
-            Text(stringResource(R.string.next_chapter))
-        }
     }
 }
 

@@ -1,6 +1,7 @@
 package com.noloxtreme.tts.reader.data
 
 import com.noloxtreme.tts.reader.domain.DocumentId
+import com.noloxtreme.tts.reader.domain.EpubBlock
 import com.noloxtreme.tts.reader.domain.EpubContentStore
 import com.noloxtreme.tts.reader.domain.EpubSpineContent
 import com.noloxtreme.tts.reader.domain.EpubTocEntry
@@ -68,6 +69,15 @@ internal class ZipEpubBookStore @Inject constructor(
             try {
                 openBook(file, file.name).use { book ->
                     val item = book.spine.getOrNull(spineIndex) ?: return@use null
+                    if (item.isCover) {
+                        return@use EpubSpineContent(
+                            spineIndex = spineIndex,
+                            title = null,
+                            blocks = listOf(
+                                EpubBlock.Image(resourcePath = item.href, contentDescription = null)
+                            )
+                        )
+                    }
                     val entry = book.zip.getEntry(item.href) ?: return@use null
                     val bytes = readEntry(book.zip, entry)
                     val document = Jsoup.parse(String(bytes, Charsets.UTF_8), item.href)
@@ -107,6 +117,15 @@ internal class ZipEpubBookStore @Inject constructor(
             openBook(file, file.name).use { book -> book.spine.size }
         } catch (_: Throwable) {
             0
+        }
+    }
+
+    override suspend fun hasCoverPage(id: DocumentId): Boolean = withContext(Dispatchers.IO) {
+        val file = sourceLocator.sourceFile(id) ?: return@withContext false
+        try {
+            openBook(file, file.name).use { book -> book.spine.firstOrNull()?.isCover == true }
+        } catch (_: Throwable) {
+            false
         }
     }
 
