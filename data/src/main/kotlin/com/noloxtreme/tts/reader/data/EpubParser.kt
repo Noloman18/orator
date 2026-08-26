@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets
 import java.util.Locale
 import java.util.zip.ZipFile
 import com.noloxtreme.tts.reader.domain.ImportError
+import com.noloxtreme.tts.reader.domain.narrationText
 import org.jsoup.Jsoup
 import org.w3c.dom.Element
 import org.xml.sax.InputSource
@@ -49,23 +50,25 @@ internal class EpubParser : BookParser {
                     String(bytes, StandardCharsets.UTF_8),
                     item.href
                 )
-                document.select("script,style,nav,form,svg,img,audio,video,iframe").remove()
                 val sectionTitle = document.select("h1,h2,h3,h4,h5,h6")
                     .firstOrNull()?.text()?.trim()
                     ?.takeIf { it.isNotBlank() }
                     ?: book.navLabels[item.href]
-                var emitted = false
-                for (block in document.select("h1,h2,h3,h4,h5,h6,p,li,blockquote,pre")) {
-                    val text = block.text().trim()
+                // Derive narration from the same block extractor the visual
+                // reader uses, so each narratable block maps one-to-one to a
+                // stored paragraph and page offsets stay aligned.
+                val body = document.body()
+                val blocks = body?.let {
+                    XhtmlBlockExtractor.extract(
+                        it,
+                        basePath = item.href.substringBeforeLast('/', ""),
+                        pageReferences = book.pageReferences.filter { ref -> ref.href == item.href }
+                    )
+                } ?: emptyList()
+                for (block in blocks) {
+                    val text = block.narrationText
                     if (text.isBlank()) continue
                     consumer(ParsedBlock(text, sectionIndex, sectionTitle))
-                    emitted = true
-                }
-                if (!emitted) {
-                    val bodyText = document.body()?.text()?.trim()
-                    if (!bodyText.isNullOrBlank()) {
-                        consumer(ParsedBlock(bodyText, sectionIndex, sectionTitle))
-                    }
                 }
                 sectionIndex += 1
             }
@@ -90,7 +93,8 @@ internal class ParsedEpub(
     val metadata: ParsedMetadata,
     val spine: List<SpineItem>,
     val navLabels: Map<String, String>,
-    val ncxHref: String?
+    val ncxHref: String?,
+    val pageReferences: List<EpubPageReference>
 ) : AutoCloseable {
     override fun close() = zip.close()
 }
@@ -100,6 +104,13 @@ internal data class SpineItem(
     val mediaType: String,
     val properties: String?,
     val isCover: Boolean = false
+)
+
+/** A source page label and the XHTML anchor at which it begins. */
+internal data class EpubPageReference(
+    val href: String,
+    val fragment: String?,
+    val label: String
 )
 
 internal fun openBook(file: File, displayName: String): ParsedEpub {
@@ -185,6 +196,7 @@ internal fun openBook(file: File, displayName: String): ParsedEpub {
             ?.let { Locale.forLanguageTag(it).toLanguageTag() }
             ?.takeIf { it != Locale.ROOT.toLanguageTag() }
         val navLabels = navLabelsFor(zip, manifest, opf, basePath, opfPath)
+        val pageReferences = pageReferencesFor(zip, manifest, ncxHref)
         return ParsedEpub(
             zip = zip,
             metadata = ParsedMetadata(
@@ -194,7 +206,8 @@ internal fun openBook(file: File, displayName: String): ParsedEpub {
             ),
             spine = spineWithCover,
             navLabels = navLabels,
-            ncxHref = ncxHref
+            ncxHref = ncxHref,
+            pageReferences = pageReferences
         )
     } catch (error: Throwable) {
         zip.close()
@@ -270,6 +283,109 @@ private fun navLabelsFor(
     }
     return labels
 }
+
+/**
+ * Reads the EPUB's declared page list. EPUB 3 stores it in the navigation
+ * document; EPUB 2 stores the equivalent targets in the NCX. The references
+ * are kept separate from the narration model because they are visual-only
+ * metadata for the EPUB read mode.
+ */
+private fun pageReferencesFor(
+    zip: ZipFile,
+    manifest: Map<String, SpineItem>,
+    ncxHref: String?
+): List<EpubPageReference> {
+    val navReferences = pageReferencesFromNav(zip, manifest)
+    if (navReferences.isNotEmpty()) return navReferences
+    return pageReferencesFromNcx(zip, ncxHref)
+}
+
+private fun pageReferencesFromNav(
+    zip: ZipFile,
+    manifest: Map<String, SpineItem>
+): List<EpubPageReference> {
+    val navItem = manifest.values.firstOrNull { item ->
+        item.mediaType.equals("application/xhtml+xml", ignoreCase = true) &&
+            item.properties.orEmpty().split(Regex("""\s+""")).any {
+                it.equals("nav", ignoreCase = true)
+            }
+    } ?: return emptyList()
+    val entry = zip.getEntry(navItem.href) ?: return emptyList()
+    val navDocument = try {
+        Jsoup.parse(String(readEntry(zip, entry), StandardCharsets.UTF_8), navItem.href)
+    } catch (_: Throwable) {
+        return emptyList()
+    }
+    val pageList = navDocument.select("nav").firstOrNull { nav ->
+        nav.attr("epub:type").split(Regex("""\s+""")).any {
+            it.equals("page-list", ignoreCase = true) ||
+                it.equals("pagelist", ignoreCase = true)
+        }
+    } ?: return emptyList()
+    val base = navItem.href.substringBeforeLast('/', "")
+    return pageList.select("a[href]").mapNotNull { anchor ->
+        val label = anchor.text().trim()
+            .ifBlank { anchor.attr("aria-label").trim() }
+            .ifBlank { anchor.attr("title").trim() }
+        pageReference(base, anchor.attr("href"), label)
+    }
+}
+
+private fun pageReferencesFromNcx(
+    zip: ZipFile,
+    ncxHref: String?
+): List<EpubPageReference> {
+    if (ncxHref == null) return emptyList()
+    val entry = zip.getEntry(ncxHref) ?: return emptyList()
+    val ncx = try {
+        parseXml(readEntry(zip, entry))
+    } catch (_: Throwable) {
+        return emptyList()
+    }
+    val pageList = ncx.getElementsByTagNameNS("*", "pageList")
+        .item(0) as? Element ?: return emptyList()
+    val base = ncxHref.substringBeforeLast('/', "")
+    val pageTargets = pageList.getElementsByTagNameNS("*", "pageTarget")
+    return (0 until pageTargets.length).mapNotNull { index ->
+        val target = pageTargets.item(index) as? Element ?: return@mapNotNull null
+        val label = target.getElementsByTagNameNS("*", "navLabel")
+            .item(0)
+            ?.let { navLabel ->
+                (navLabel as? Element)
+                    ?.getElementsByTagNameNS("*", "text")
+                    ?.item(0)
+                    ?.textContent
+            }
+            ?.trim()
+            .orEmpty()
+        val source = target.getElementsByTagNameNS("*", "content")
+            .item(0) as? Element
+        pageReference(base, source?.getAttribute("src").orEmpty(), label)
+    }
+}
+
+private fun pageReference(
+    base: String,
+    href: String,
+    label: String
+): EpubPageReference? {
+    val trimmedLabel = label.trim()
+    if (trimmedLabel.isBlank()) return null
+    val hash = href.indexOf('#')
+    val path = href.substring(0, if (hash >= 0) hash else href.length)
+    val fragment = if (hash >= 0) {
+        href.substring(hash + 1).takeIf { it.isNotBlank() }?.let(::decodeFragment)
+    } else {
+        null
+    }
+    return safeZipPathOrNull(base, path)?.let { target ->
+        EpubPageReference(target, fragment, trimmedLabel)
+    }
+}
+
+private fun decodeFragment(fragment: String): String = runCatching {
+    URLDecoder.decode(fragment, "UTF-8")
+}.getOrDefault(fragment)
 
 internal fun safeZipPathOrNull(base: String, href: String): String? = try {
     safeZipPath(base, href)

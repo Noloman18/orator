@@ -79,8 +79,13 @@
     <string name="table_of_contents">Contents</string>
     <string name="previous_chapter">Previous chapter</string>
     <string name="next_chapter">Next chapter</string>
+    <string name="previous_page">Previous page</string>
+    <string name="next_page">Next page</string>
     <string name="epub_chapter_unavailable_title">Chapter unavailable</string>
     <string name="epub_chapter_unavailable_body">This chapter could not be displayed.</string>
+    <string name="ebook_page_number">Page %1$s</string>
+    <string name="read_mode_page_position">%1$d / %2$d</string>
+    <string name="read_mode_page_position_with_label">%1$s · %2$d / %3$d</string>
     <plurals name="books_count">
         <item quantity="one">%1$d book</item>
         <item quantity="other">%1$d books</item>

@@ -1,0 +1,9 @@
+Version 1.4 (build 6)
+
+What's new in this release:
+
+- New Kindle-style page-by-page ebook reader: whole pages instead of scrolling, tap the edges or swipe to turn pages, with a page counter and the book's own printed page labels
+- Fast-forward and rewind turn pages in the ebook reader, while the skip buttons move between chapters
+- The ebook reader remembers where you left off and reopens on the same page
+- Playback and the visual reader stay in sync: play starts reading from the page you are viewing, and opening the ebook lands on the page the audio is reading
+- Block quotes and nested lists are no longer spoken twice (re-import existing books to apply this)

@@ -78,6 +78,20 @@ data class ReadingProgress(
     val completed: Boolean
 )
 
+/**
+ * The visual read-mode position inside an EPUB: which spine item (including
+ * the synthesized cover slot at index 0) and which packed page of it.
+ */
+data class ReaderPosition(
+    val spineIndex: Int,
+    val pageIndex: Int
+) {
+    init {
+        require(spineIndex >= 0)
+        require(pageIndex >= 0)
+    }
+}
+
 const val FAST_JUMP_SENTENCE_COUNT = 5
 
 enum class ThemePreference {
@@ -216,6 +230,16 @@ interface ProgressRepository {
     fun observeProgress(id: DocumentId): Flow<ReadingProgress?>
     suspend fun getProgress(id: DocumentId): ReadingProgress?
     suspend fun saveProgress(progress: ReadingProgress)
+}
+
+/**
+ * Persists where the visual read mode was left, per document, so reopening a
+ * book lands on the same chapter and page. Distinct from [ProgressRepository],
+ * which tracks the narration position.
+ */
+interface ReaderPositionRepository {
+    fun observe(id: DocumentId): Flow<ReaderPosition?>
+    suspend fun save(id: DocumentId, position: ReaderPosition)
 }
 
 interface SettingsRepository {

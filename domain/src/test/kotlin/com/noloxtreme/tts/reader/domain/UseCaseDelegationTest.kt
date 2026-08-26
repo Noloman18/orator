@@ -4,12 +4,14 @@ import com.noloxtreme.tts.reader.domain.usecase.DeleteDocument
 import com.noloxtreme.tts.reader.domain.usecase.ImportDocument
 import com.noloxtreme.tts.reader.domain.usecase.ObserveLibrary
 import com.noloxtreme.tts.reader.domain.usecase.ObserveReaderContent
+import com.noloxtreme.tts.reader.domain.usecase.ObserveReaderPosition
 import com.noloxtreme.tts.reader.domain.usecase.ObserveReadingProgress
 import com.noloxtreme.tts.reader.domain.usecase.ObserveSettings
 import com.noloxtreme.tts.reader.domain.usecase.OpenDocument
 import com.noloxtreme.tts.reader.domain.usecase.PauseNarration
 import com.noloxtreme.tts.reader.domain.usecase.RestartCompletedDocument
 import com.noloxtreme.tts.reader.domain.usecase.ReaderContent
+import com.noloxtreme.tts.reader.domain.usecase.SaveReaderPosition
 import com.noloxtreme.tts.reader.domain.usecase.SeekNarration
 import com.noloxtreme.tts.reader.domain.usecase.SkipSentence
 import com.noloxtreme.tts.reader.domain.usecase.StartOrResumeNarration
@@ -22,6 +24,7 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -132,6 +135,21 @@ class UseCaseDelegationTest {
         assertFalse(repository.value.followSpokenText)
     }
 
+    @Test
+    fun readerPositionUseCasesObserveAndSavePositions() = runTest {
+        val repository = RecordingReaderPositionRepository()
+
+        assertNull(ObserveReaderPosition(repository).execute(document.id).first())
+
+        SaveReaderPosition(repository).execute(document.id, ReaderPosition(2, 5))
+
+        assertEquals(
+            ReaderPosition(2, 5),
+            ObserveReaderPosition(repository).execute(document.id).first()
+        )
+        assertEquals(document.id, repository.savedId)
+    }
+
     private class RecordingNarrationController : NarrationController {
         override val state = MutableStateFlow<NarrationState>(NarrationState.Idle)
         val commands = mutableListOf<NarrationCommand>()
@@ -173,6 +191,18 @@ class UseCaseDelegationTest {
         override suspend fun getProgress(id: DocumentId): ReadingProgress = value
 
         override suspend fun saveProgress(progress: ReadingProgress) = Unit
+    }
+
+    private class RecordingReaderPositionRepository : ReaderPositionRepository {
+        private val positions = MutableStateFlow<ReaderPosition?>(null)
+        var savedId: DocumentId? = null
+
+        override fun observe(id: DocumentId): Flow<ReaderPosition?> = positions
+
+        override suspend fun save(id: DocumentId, position: ReaderPosition) {
+            savedId = id
+            positions.value = position
+        }
     }
 
     private class RecordingImporter : DocumentImporter {

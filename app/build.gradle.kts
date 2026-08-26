@@ -39,8 +39,8 @@ android {
         applicationId = "com.noloxtreme.tts.reader"
         minSdk = 24
         targetSdk = 37
-        versionCode = 5
-        versionName = "1.3.1"
+        versionCode = 6
+        versionName = "1.4.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -67,6 +67,9 @@ android {
     buildFeatures {
         compose = true
     }
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
 }
 
 dependencies {
@@ -92,6 +95,9 @@ dependencies {
     implementation(libs.androidx.coroutines.android)
     ksp(libs.androidx.hilt.compiler)
     testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -120,4 +126,10 @@ tasks.register("buildSignedBundle") {
             )
         }
     }
+}
+
+// The ReaderScreenshotTest only captures screenshots when requested:
+// ./gradlew :app:testDebugUnitTest --tests "*ReaderScreenshotTest" -Porator.screenshot=true
+tasks.withType<Test>().configureEach {
+    systemProperty("orator.screenshot", project.findProperty("orator.screenshot") ?: "")
 }

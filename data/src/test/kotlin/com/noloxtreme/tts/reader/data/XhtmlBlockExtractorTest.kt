@@ -10,9 +10,13 @@ import org.junit.Test
 
 class XhtmlBlockExtractorTest {
 
-    private fun blocks(bodyHtml: String, basePath: String = "text"): List<EpubBlock> {
+    private fun blocks(
+        bodyHtml: String,
+        basePath: String = "text",
+        pageReferences: List<EpubPageReference> = emptyList()
+    ): List<EpubBlock> {
         val body = Jsoup.parse("<body>$bodyHtml</body>").body()
-        return XhtmlBlockExtractor.extract(body, basePath)
+        return XhtmlBlockExtractor.extract(body, basePath, pageReferences)
     }
 
     private fun text(block: EpubBlock): String = when (block) {
@@ -21,6 +25,7 @@ class XhtmlBlockExtractorTest {
         is EpubBlock.Quote -> block.runs.joinToString("") { it.text }
         is EpubBlock.ListItem -> block.runs.joinToString("") { it.text }
         is EpubBlock.Image -> "img:" + block.resourcePath
+        is EpubBlock.PageNumber -> "page:" + block.label
         EpubBlock.Divider -> "hr"
     }
 
@@ -179,6 +184,25 @@ class XhtmlBlockExtractorTest {
             .single()
 
         assertNull(image.contentDescription)
+    }
+
+    @Test
+    fun pageBreaksAndPageListAnchorsBecomeVisualOnlyBlocks() {
+        val result = blocks(
+            """
+            <p id="page-one">First page.</p>
+            <span epub:type="pagebreak" title="2"></span>
+            <p>Second page.</p>
+            """.trimIndent(),
+            pageReferences = listOf(
+                EpubPageReference("text/chapter.xhtml", "page-one", "1")
+            )
+        )
+
+        assertEquals(
+            listOf("page:1", "First page.", "page:2", "Second page."),
+            result.map(::text)
+        )
     }
 
     @Test

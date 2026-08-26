@@ -28,13 +28,52 @@ class NarrationTransport(
     override fun fastForward() = fastForwardAction()
 }
 
-/** Reading mode: the transport buttons move between chapters (spine items). */
+/**
+ * Reading mode: the skip buttons move between chapters (spine items) while
+ * the fast buttons turn pages inside the current chapter, mirroring the
+ * swipe gesture. This keeps the fast buttons distinct from the skip buttons
+ * and matches the narration mode, where skip moves one sentence and fast
+ * jumps several.
+ */
 class ChapterTransport(
     private val previousChapter: () -> Unit,
-    private val nextChapter: () -> Unit
+    private val nextChapter: () -> Unit,
+    private val previousPage: () -> Unit,
+    private val nextPage: () -> Unit
 ) : ReaderTransport {
-    override fun rewind() = previousChapter()
+    override fun rewind() = previousPage()
     override fun previous() = previousChapter()
     override fun next() = nextChapter()
-    override fun fastForward() = nextChapter()
+    override fun fastForward() = nextPage()
+}
+
+/** The result of requesting a page turn in read mode. */
+sealed interface PageTurnAdvance {
+
+    /** Move to this page index. */
+    data class ToPage(val index: Int) : PageTurnAdvance
+
+    /** The reader is at a page boundary: move to the adjacent chapter instead. */
+    data object CrossChapter : PageTurnAdvance
+
+    /** Stay put; no pages are measurable yet (chapter still loading or empty). */
+    data object Stay : PageTurnAdvance
+}
+
+/**
+ * Forward page turn: the next page, or the next chapter once the known page
+ * count is exhausted. Returns [PageTurnAdvance.Stay] while the chapter has no
+ * measurable pages, so a button press during loading does not skip chapters.
+ */
+fun nextPageAdvance(currentPage: Int, pageCount: Int): PageTurnAdvance = when {
+    pageCount <= 0 -> PageTurnAdvance.Stay
+    currentPage >= pageCount - 1 -> PageTurnAdvance.CrossChapter
+    else -> PageTurnAdvance.ToPage(currentPage + 1)
+}
+
+/** Backward page turn: the previous page, or the previous chapter at page one. */
+fun previousPageAdvance(currentPage: Int): PageTurnAdvance = if (currentPage > 0) {
+    PageTurnAdvance.ToPage(currentPage - 1)
+} else {
+    PageTurnAdvance.CrossChapter
 }

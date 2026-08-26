@@ -13,6 +13,8 @@ import com.noloxtreme.tts.reader.domain.DocumentPosition
 import com.noloxtreme.tts.reader.domain.DocumentRepository
 import com.noloxtreme.tts.reader.domain.Paragraph
 import com.noloxtreme.tts.reader.domain.ProgressRepository
+import com.noloxtreme.tts.reader.domain.ReaderPosition
+import com.noloxtreme.tts.reader.domain.ReaderPositionRepository
 import com.noloxtreme.tts.reader.domain.ReadingProgress
 import com.noloxtreme.tts.reader.domain.Section
 import com.noloxtreme.tts.reader.domain.TimeProvider
@@ -138,6 +140,18 @@ class RoomContentRepository @Inject constructor(
 }
 
 @Singleton
+class RoomReaderPositionRepository @Inject constructor(
+    private val dao: ReaderPositionDao
+) : ReaderPositionRepository {
+    override fun observe(id: DocumentId): Flow<ReaderPosition?> =
+        dao.observe(id.value).map { it?.toDomain() }
+
+    override suspend fun save(id: DocumentId, position: ReaderPosition) {
+        dao.upsert(position.toEntity(id))
+    }
+}
+
+@Singleton
 class RoomProgressRepository @Inject constructor(
     private val dao: ProgressDao,
     private val contentDao: ContentDao
@@ -233,6 +247,11 @@ private fun ReadingProgress.toEntity() = ReadingProgressEntity(
     updatedAt = updatedAtEpochMillis,
     isCompleted = completed
 )
+
+private fun ReaderPositionEntity.toDomain() = ReaderPosition(spineIndex, pageIndex)
+
+private fun ReaderPosition.toEntity(id: DocumentId) =
+    ReaderPositionEntity(id.value, spineIndex, pageIndex)
 
 private fun Paragraph.positionAt(offset: Int): DocumentPosition =
     DocumentPosition(paragraphIndex, offset.coerceIn(0, text.length), absoluteStart + offset)

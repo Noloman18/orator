@@ -55,7 +55,70 @@ sealed interface EpubBlock {
         }
     }
 
+    /** A page label declared by the EPUB's page list or page-break markup. */
+    data class PageNumber(val label: String) : EpubBlock {
+        init {
+            require(label.isNotBlank())
+        }
+    }
+
     data object Divider : EpubBlock
+}
+
+/**
+ * The narration text of a block: its inline runs concatenated without a
+ * separator. Images, dividers and page labels contribute nothing. This is the
+ * single source of truth shared by the visual reader, the paginator's
+ * character offsets, and the narration paragraph stream, so the two stay
+ * aligned.
+ */
+val EpubBlock.narrationText: String
+    get() = when (this) {
+        is EpubBlock.Heading -> runs.joinToString(separator = "") { it.text }
+        is EpubBlock.Paragraph -> runs.joinToString(separator = "") { it.text }
+        is EpubBlock.Quote -> runs.joinToString(separator = "") { it.text }
+        is EpubBlock.ListItem -> runs.joinToString(separator = "") { it.text }
+        is EpubBlock.Image, is EpubBlock.PageNumber, EpubBlock.Divider -> ""
+    }
+
+/**
+ * How many narratable blocks (those with non-empty [EpubBlock.narrationText])
+ * appear strictly before [blockIndex]. Because narration stores one paragraph
+ * per narratable block, this maps a block to its paragraph index.
+ */
+fun narratableBlocksBefore(blocks: List<EpubBlock>, blockIndex: Int): Int =
+    blocks.take(blockIndex.coerceIn(0, blocks.size)).count { it.narrationText.isNotEmpty() }
+
+/**
+ * Maps a character offset inside a block's raw inline text ([charStart]) to an
+ * offset in its stored narration paragraph, whose text is the block text with
+ * leading whitespace trimmed.
+ */
+fun narrationOffsetInParagraph(blockText: String, charStart: Int): Int =
+    (charStart - blockText.takeWhile { it.isWhitespace() }.length).coerceAtLeast(0)
+
+/**
+ * Inverse of [narrationOffsetInParagraph]: maps an offset in the stored
+ * narration paragraph back to a character offset in the raw block text.
+ */
+fun narrationOffsetInBlock(blockText: String, offsetInParagraph: Int): Int =
+    offsetInParagraph.coerceAtLeast(0) + blockText.takeWhile { it.isWhitespace() }.length
+
+/**
+ * The index of the block at the given narratable rank (the rank-th block with
+ * non-empty [EpubBlock.narrationText]), or null when the rank exceeds the
+ * block list. Inverse of [narratableBlocksBefore].
+ */
+fun blockAtNarratableRank(blocks: List<EpubBlock>, rank: Int): Int? {
+    if (rank < 0) return null
+    var remaining = rank
+    blocks.forEachIndexed { index, block ->
+        if (block.narrationText.isNotEmpty()) {
+            if (remaining == 0) return index
+            remaining -= 1
+        }
+    }
+    return null
 }
 
 /** The rendered content of one spine item (a chapter) of a visual EPUB. */

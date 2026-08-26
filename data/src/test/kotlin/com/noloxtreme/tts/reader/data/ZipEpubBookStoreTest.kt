@@ -80,6 +80,12 @@ class ZipEpubBookStoreTest {
                   <content src="chapter3.xhtml#frag"/>
                 </navPoint>
               </navMap>
+              <pageList>
+                <pageTarget type="normal" id="p1">
+                  <navLabel><text>1</text></navLabel>
+                  <content src="text/chapter1.xhtml#page-one"/>
+                </pageTarget>
+              </pageList>
             </ncx>
         """.trim()
         return factory.buildEpub(
@@ -96,7 +102,7 @@ class ZipEpubBookStoreTest {
                 spineTocAttribute = "ncx"
             ),
             "OEBPS/toc.ncx" to ncx,
-            "OEBPS/text/chapter1.xhtml" to factory.xhtml("<p>One.</p>"),
+            "OEBPS/text/chapter1.xhtml" to factory.xhtml("""<p id="page-one">One.</p>"""),
             "OEBPS/chapter2.xhtml" to factory.xhtml("<p>Two.</p>"),
             "OEBPS/chapter3.xhtml" to factory.xhtml("<p>Three.</p>")
         )
@@ -131,6 +137,19 @@ class ZipEpubBookStoreTest {
                 EpubTocEntry("Second", 2, 0)
             ),
             toc
+        )
+    }
+
+    @Test
+    fun spineContentDisplaysNcxPageLabelsAtPageTargets() = runBlocking {
+        val content = store(ncxEpub()).spineContent(DocumentId("doc"), 0)
+
+        assertEquals(
+            listOf(
+                EpubBlock.PageNumber("1"),
+                EpubBlock.Paragraph(listOf(EpubRun("One.")))
+            ),
+            content?.blocks
         )
     }
 
@@ -176,6 +195,59 @@ class ZipEpubBookStoreTest {
         )
         val loaded = store(file).imageResource(DocumentId("doc"), "OEBPS/images/pic.png")
         assertEquals(pngBytes.toList(), loaded!!.toList())
+    }
+
+    @Test
+    fun spineContentDisplaysEpub3PageListLabelsAtPageBreaks() = runBlocking {
+        val nav = """
+            <html xmlns="http://www.w3.org/1999/xhtml"
+                xmlns:epub="http://www.idpf.org/2007/ops">
+            <body>
+              <nav epub:type="toc"><ol>
+                <li><a href="chapter1.xhtml">Chapter</a></li>
+              </ol></nav>
+              <nav epub:type="page-list"><ol>
+                <li><a href="chapter1.xhtml#page-one">1</a></li>
+                <li><a href="chapter1.xhtml#page-two">2</a></li>
+              </ol></nav>
+            </body>
+            </html>
+        """.trim()
+        val chapter = """
+            <html xmlns="http://www.w3.org/1999/xhtml"
+                xmlns:epub="http://www.idpf.org/2007/ops">
+            <body>
+              <p id="page-one">First page.</p>
+              <span id="page-two" epub:type="pagebreak"></span>
+              <p>Second page.</p>
+            </body>
+            </html>
+        """.trim()
+        val file = factory.buildEpub(
+            "mimetype" to "application/epub+zip",
+            factory.containerXml(),
+            factory.opf3(
+                manifest = """
+                    <item id="c1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
+                    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+                """.trimIndent(),
+                spineRefs = listOf("c1")
+            ),
+            "OEBPS/nav.xhtml" to nav,
+            "OEBPS/chapter1.xhtml" to chapter
+        )
+
+        val content = store(file).spineContent(DocumentId("doc"), 0)
+
+        assertEquals(
+            listOf(
+                EpubBlock.PageNumber("1"),
+                EpubBlock.Paragraph(listOf(EpubRun("First page."))),
+                EpubBlock.PageNumber("2"),
+                EpubBlock.Paragraph(listOf(EpubRun("Second page.")))
+            ),
+            content?.blocks
+        )
     }
 
     @Test

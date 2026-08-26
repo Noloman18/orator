@@ -41,4 +41,16 @@ class ModelsTest {
         assertEquals(true, settings.followSpokenText)
         assertEquals(ThemePreference.SYSTEM, settings.theme)
     }
+
+    @Test
+    fun readerPositionAcceptsChapterStartAtPageZero() {
+        assertEquals(ReaderPosition(0, 0), ReaderPosition(0, 0))
+        assertEquals(ReaderPosition(4, 12), ReaderPosition(4, 12))
+    }
+
+    @Test
+    fun readerPositionRejectsNegativeIndices() {
+        assertThrows(IllegalArgumentException::class.java) { ReaderPosition(-1, 0) }
+        assertThrows(IllegalArgumentException::class.java) { ReaderPosition(0, -1) }
+    }
 }

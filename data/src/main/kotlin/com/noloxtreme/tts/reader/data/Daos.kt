@@ -132,3 +132,15 @@ interface ProgressDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(progress: ReadingProgressEntity)
 }
+
+@Dao
+interface ReaderPositionDao {
+    @Query("SELECT * FROM reader_positions WHERE documentId = :documentId LIMIT 1")
+    fun observe(documentId: String): Flow<ReaderPositionEntity?>
+
+    @Query("SELECT * FROM reader_positions WHERE documentId = :documentId LIMIT 1")
+    suspend fun get(documentId: String): ReaderPositionEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(position: ReaderPositionEntity)
+}

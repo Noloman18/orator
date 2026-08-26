@@ -9,6 +9,7 @@ import com.noloxtreme.tts.reader.domain.Document
 import com.noloxtreme.tts.reader.domain.DocumentId
 import com.noloxtreme.tts.reader.domain.DocumentPosition
 import com.noloxtreme.tts.reader.domain.EPUB_MIME_TYPE
+import com.noloxtreme.tts.reader.domain.EpubBlock
 import com.noloxtreme.tts.reader.domain.EpubSpineContent
 import com.noloxtreme.tts.reader.domain.EpubTocEntry
 import com.noloxtreme.tts.reader.domain.FAST_JUMP_SENTENCE_COUNT
@@ -17,12 +18,19 @@ import com.noloxtreme.tts.reader.domain.NarrationController
 import com.noloxtreme.tts.reader.domain.NarrationState
 import com.noloxtreme.tts.reader.domain.OratorSettings
 import com.noloxtreme.tts.reader.domain.Paragraph
+import com.noloxtreme.tts.reader.domain.ReaderPosition
 import com.noloxtreme.tts.reader.domain.ReadingProgress
+import com.noloxtreme.tts.reader.domain.blockAtNarratableRank
+import com.noloxtreme.tts.reader.domain.narratableBlocksBefore
+import com.noloxtreme.tts.reader.domain.narrationOffsetInBlock
+import com.noloxtreme.tts.reader.domain.narrationOffsetInParagraph
+import com.noloxtreme.tts.reader.domain.narrationText
 import com.noloxtreme.tts.reader.domain.usecase.LoadCoverPresence
 import com.noloxtreme.tts.reader.domain.usecase.LoadImageResource
 import com.noloxtreme.tts.reader.domain.usecase.LoadSpineContent
 import com.noloxtreme.tts.reader.domain.usecase.LoadSpineCount
 import com.noloxtreme.tts.reader.domain.usecase.LoadTableOfContents
+import com.noloxtreme.tts.reader.domain.usecase.ObserveReaderPosition
 import com.noloxtreme.tts.reader.domain.usecase.ReaderContent
 import com.noloxtreme.tts.reader.domain.usecase.ObserveReaderContent
 import com.noloxtreme.tts.reader.domain.usecase.ObserveReadingProgress
@@ -30,6 +38,7 @@ import com.noloxtreme.tts.reader.domain.usecase.ObserveSettings
 import com.noloxtreme.tts.reader.domain.usecase.OpenDocument
 import com.noloxtreme.tts.reader.domain.usecase.PauseNarration
 import com.noloxtreme.tts.reader.domain.usecase.RestartCompletedDocument
+import com.noloxtreme.tts.reader.domain.usecase.SaveReaderPosition
 import com.noloxtreme.tts.reader.domain.usecase.SeekNarration
 import com.noloxtreme.tts.reader.domain.usecase.SkipSentence
 import com.noloxtreme.tts.reader.domain.usecase.StartOrResumeNarration
@@ -86,14 +95,29 @@ class ReaderViewModel @Inject constructor(
     private val loadSpineCount: LoadSpineCount,
     private val loadCoverPresence: LoadCoverPresence,
     private val loadImageResource: LoadImageResource,
+    private val observeReaderPosition: ObserveReaderPosition,
+    private val saveReaderPosition: SaveReaderPosition,
     val narrationController: NarrationController
 ) : ViewModel() {
     private val pageRequest = MutableStateFlow<DocumentId?>(null)
     private val initialParagraph = MutableStateFlow(0)
     private val mutableEpubReading = MutableStateFlow<EpubReadingState?>(null)
+    private val mutableReaderPageIndex = MutableStateFlow(0)
+    private val mutableReaderPageCount = MutableStateFlow(0)
+    private val mutablePageAnchor = MutableStateFlow<PageTextAnchor?>(null)
+    private val mutableJumpTarget = MutableStateFlow<PageTextAnchor?>(null)
     private val imageCache = java.util.concurrent.ConcurrentHashMap<String, ByteArray?>()
 
     val epubReading: StateFlow<EpubReadingState?> = mutableEpubReading.asStateFlow()
+
+    /** The read-mode page shown inside the current spine item. */
+    val readerPageIndex: StateFlow<Int> = mutableReaderPageIndex.asStateFlow()
+
+    /** How many pages the current spine item was packed into (0 until measured). */
+    val readerPageCount: StateFlow<Int> = mutableReaderPageCount.asStateFlow()
+
+    /** A pending jump target for the paged reader; cleared once it is resolved. */
+    val readerJumpTarget: StateFlow<PageTextAnchor?> = mutableJumpTarget.asStateFlow()
 
     private val narrationTransport = NarrationTransport(
         rewindAction = ::rewind,
@@ -103,7 +127,9 @@ class ReaderViewModel @Inject constructor(
     )
     private val chapterTransport = ChapterTransport(
         previousChapter = ::previousSpineItem,
-        nextChapter = ::nextSpineItem
+        nextChapter = ::nextSpineItem,
+        previousPage = ::previousReaderPage,
+        nextPage = ::nextReaderPage
     )
 
     /**
@@ -182,6 +208,50 @@ class ReaderViewModel @Inject constructor(
 
     fun play() = startOrResumeNarration.execute()
 
+    /**
+     * Starts narration from the page the reader is currently showing. Resolves
+     * the page's first text to a narration position, seeks there, then plays.
+     * Falls back to the chapter start when the visual and narration text no
+     * longer align (for example, an EPUB imported before the extraction was
+     * unified).
+     */
+    fun playFromCurrentPage() {
+        viewModelScope.launch {
+            currentPagePosition()?.let { position -> seekNarration.execute(position) }
+            startOrResumeNarration.execute()
+        }
+    }
+
+    /**
+     * Maps the current reader page to a narration [DocumentPosition]. Only
+     * returns a position when the block's inline text matches the stored
+     * paragraph exactly, so a stale or misaligned import degrades gracefully
+     * instead of seeking to the wrong text.
+     */
+    private suspend fun currentPagePosition(): DocumentPosition? {
+        val id = pageRequest.value ?: return null
+        val reading = mutableEpubReading.value ?: return null
+        val blocks = reading.content?.blocks ?: return null
+        val anchor = mutablePageAnchor.value ?: return null
+        val block = blocks.getOrNull(anchor.blockIndex) ?: return null
+        val blockText = block.narrationText
+        if (blockText.isEmpty()) return null
+        val sectionIndex = reading.currentSpineIndex - reading.coverOffset
+        val section = contentRepository.section(id, sectionIndex) ?: return null
+        val sectionStart = DocumentPosition(
+            paragraphIndex = section.firstParagraphIndex,
+            offsetInParagraph = 0,
+            absoluteOffset = section.absoluteStart
+        )
+        val paragraphIndex = section.firstParagraphIndex + narratableBlocksBefore(blocks, anchor.blockIndex)
+        val paragraph = contentRepository.paragraph(id, paragraphIndex) ?: return sectionStart
+        if (paragraph.sectionIndex != sectionIndex) return sectionStart
+        if (paragraph.text != blockText.trim()) return sectionStart
+        val offset = narrationOffsetInParagraph(blockText, anchor.charStart)
+            .coerceIn(0, paragraph.text.length)
+        return DocumentPosition(paragraphIndex, offset, paragraph.absoluteStart + offset)
+    }
+
     fun pause() = pauseNarration.execute()
 
     fun previousSentence() = skipSentence.execute(previous = true)
@@ -227,13 +297,14 @@ class ReaderViewModel @Inject constructor(
         if (mutableEpubReading.value != null) return
         val id = pageRequest.value ?: return
         if (document.value?.mimeType != EPUB_MIME_TYPE) return
+        mutableReaderPageIndex.value = 0
+        mutableReaderPageCount.value = 0
         viewModelScope.launch {
             val coverOffset = if (runCatching { loadCoverPresence.execute(id) }.getOrDefault(false)) 1 else 0
-            val startSpineIndex = currentSpineIndexFor(id, coverOffset)
             mutableEpubReading.value = EpubReadingState(
                 toc = emptyList(),
                 spineCount = 0,
-                currentSpineIndex = startSpineIndex,
+                currentSpineIndex = 0,
                 content = null,
                 loadingContent = true,
                 unavailable = false,
@@ -248,12 +319,44 @@ class ReaderViewModel @Inject constructor(
             mutableEpubReading.update {
                 it?.copy(toc = toc, spineCount = spineCount)
             }
-            openSpineItem(startSpineIndex)
+            // Enter where the audio currently is (EPUB-only read mode), then
+            // fall back to the saved visual position and finally the start of
+            // the book.
+            val narrated = narrationController.state.value
+                .takeIf { it.documentIdOrNull() == id }
+                ?.positionOrNull()
+            val narratedSpine = narrated?.let { position ->
+                contentRepository.paragraph(id, position.paragraphIndex)
+                    ?.sectionIndex?.plus(coverOffset)
+            }
+            val saved = runCatching { observeReaderPosition.execute(id).first() }.getOrNull()
+            val startSpineIndex: Int
+            val initialPageIndex: Int
+            val narrationJump: DocumentPosition?
+            when {
+                narratedSpine != null && narratedSpine < spineCount -> {
+                    startSpineIndex = narratedSpine
+                    initialPageIndex = 0
+                    narrationJump = narrated
+                }
+                saved != null && saved.spineIndex < spineCount -> {
+                    startSpineIndex = saved.spineIndex
+                    initialPageIndex = saved.pageIndex
+                    narrationJump = null
+                }
+                else -> {
+                    startSpineIndex = currentSpineIndexFor(id, coverOffset)
+                    initialPageIndex = 0
+                    narrationJump = null
+                }
+            }
+            openSpineItem(startSpineIndex, initialPageIndex, narrationJump)
         }
     }
 
     fun exitReadMode() {
         mutableEpubReading.value = null
+        mutableJumpTarget.value = null
     }
 
     fun retryCurrentSpine() {
@@ -293,6 +396,53 @@ class ReaderViewModel @Inject constructor(
         if (target >= 0) openSpineItem(target)
     }
 
+    /**
+     * Turns to the next page of the current spine item, or opens the next
+     * chapter when the reader is on the last page. Shared by the swipe and
+     * tap gestures and the transport's fast-forward button.
+     */
+    fun nextReaderPage() {
+        when (val advance = nextPageAdvance(mutableReaderPageIndex.value, mutableReaderPageCount.value)) {
+            is PageTurnAdvance.ToPage -> {
+                mutableReaderPageIndex.value = advance.index
+                persistReaderPosition(advance.index)
+            }
+            PageTurnAdvance.CrossChapter -> nextSpineItem()
+            PageTurnAdvance.Stay -> Unit
+        }
+    }
+
+    /**
+     * Turns to the previous page of the current spine item, or opens the
+     * previous chapter when the reader is on the first page. Shared by the
+     * swipe and tap gestures and the transport's rewind button.
+     */
+    fun previousReaderPage() {
+        when (val advance = previousPageAdvance(mutableReaderPageIndex.value)) {
+            is PageTurnAdvance.ToPage -> {
+                mutableReaderPageIndex.value = advance.index
+                persistReaderPosition(advance.index)
+            }
+            PageTurnAdvance.CrossChapter -> previousSpineItem()
+            PageTurnAdvance.Stay -> Unit
+        }
+    }
+
+    /** The paged reader reports how many pages the current chapter was packed into. */
+    fun setReaderPageCount(count: Int) {
+        mutableReaderPageCount.value = count.coerceAtLeast(0)
+        val maxIndex = (count - 1).coerceAtLeast(0)
+        if (mutableReaderPageIndex.value > maxIndex) {
+            mutableReaderPageIndex.value = maxIndex
+            persistReaderPosition(maxIndex)
+        }
+    }
+
+    /** The paged reader reports the first text position of the current page. */
+    fun setPageAnchor(anchor: PageTextAnchor?) {
+        mutablePageAnchor.value = anchor
+    }
+
     suspend fun imageBytes(resourcePath: String): ByteArray? {
         val id = pageRequest.value ?: return null
         val cacheKey = id.value + "/" + resourcePath
@@ -302,9 +452,23 @@ class ReaderViewModel @Inject constructor(
         return bytes
     }
 
-    private fun openSpineItem(spineIndex: Int) {
+    /**
+     * Opens a spine item, starting at [initialPageIndex] (page zero for
+     * ordinary chapter navigation, the saved page when resuming read mode).
+     * When [narrationJump] is set, the reader lands on the page that holds
+     * that narration position once the chapter's blocks are loaded.
+     */
+    private fun openSpineItem(
+        spineIndex: Int,
+        initialPageIndex: Int = 0,
+        narrationJump: DocumentPosition? = null
+    ) {
         val id = pageRequest.value ?: return
+        mutableReaderPageIndex.value = initialPageIndex
+        mutableReaderPageCount.value = 0
+        mutableJumpTarget.value = null
         mutableEpubReading.update { it?.copy(currentSpineIndex = spineIndex, loadingContent = true) }
+        persistReaderPosition(initialPageIndex)
         viewModelScope.launch {
             val content = runCatching { loadSpineContent.execute(id, spineIndex) }.getOrNull()
             if (pageRequest.value != id || mutableEpubReading.value == null) return@launch
@@ -312,6 +476,50 @@ class ReaderViewModel @Inject constructor(
                 it?.takeIf { state -> state.currentSpineIndex == spineIndex }
                     ?.copy(content = content, loadingContent = false, unavailable = content == null)
             }
+            narrationJump?.let { position ->
+                resolveNarrationJump(id, content?.blocks, position)
+                    ?.let { target -> mutableJumpTarget.value = target }
+            }
+        }
+    }
+
+    /**
+     * Maps a narration position to the block and character offset inside the
+     * chapter's blocks that the reader should jump to. Returns null when the
+     * stored narration text no longer matches the visual blocks (for example,
+     * an EPUB imported before the extraction was unified), so the reader
+     * stays at the chapter start instead of landing on the wrong page.
+     */
+    private suspend fun resolveNarrationJump(
+        id: DocumentId,
+        blocks: List<EpubBlock>?,
+        position: DocumentPosition
+    ): PageTextAnchor? {
+        if (blocks == null) return null
+        val paragraph = contentRepository.paragraph(id, position.paragraphIndex) ?: return null
+        val section = contentRepository.section(id, paragraph.sectionIndex) ?: return null
+        val rank = position.paragraphIndex - section.firstParagraphIndex
+        val blockIndex = blockAtNarratableRank(blocks, rank) ?: return null
+        val blockText = blocks[blockIndex].narrationText
+        if (paragraph.text != blockText.trim()) return null
+        val charStart = narrationOffsetInBlock(blockText, position.offsetInParagraph)
+            .coerceIn(0, blockText.length)
+        return PageTextAnchor(blockIndex, charStart)
+    }
+
+    /** The paged reader resolved a narration jump: own the page and clear the target. */
+    fun resolveReaderJump(pageIndex: Int) {
+        mutableReaderPageIndex.value = pageIndex
+        mutableJumpTarget.value = null
+        persistReaderPosition(pageIndex)
+    }
+
+    /** Best-effort persistence of the current read-mode position. */
+    private fun persistReaderPosition(pageIndex: Int) {
+        val id = pageRequest.value ?: return
+        val spineIndex = mutableEpubReading.value?.currentSpineIndex ?: return
+        viewModelScope.launch {
+            runCatching { saveReaderPosition.execute(id, ReaderPosition(spineIndex, pageIndex)) }
         }
     }
 
@@ -343,5 +551,12 @@ private fun NarrationState.paragraphIndexOrNull(): Int? = when (this) {
     is NarrationState.Preparing -> requestedPosition.paragraphIndex
     is NarrationState.Playing -> safePosition.paragraphIndex
     is NarrationState.Paused -> resumePosition.paragraphIndex
+    else -> null
+}
+
+private fun NarrationState.positionOrNull(): DocumentPosition? = when (this) {
+    is NarrationState.Preparing -> requestedPosition
+    is NarrationState.Playing -> safePosition
+    is NarrationState.Paused -> resumePosition
     else -> null
 }

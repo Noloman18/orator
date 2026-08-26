@@ -72,6 +72,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -502,6 +503,8 @@ private fun ReaderScreen(
     val sectionTitle by viewModel.sectionTitle.collectAsState()
     val epubReading by viewModel.epubReading.collectAsState()
     val transport by viewModel.transport.collectAsState()
+    val readerPageIndex by viewModel.readerPageIndex.collectAsState()
+    val readerJumpTarget by viewModel.readerJumpTarget.collectAsState()
     val inReadMode = epubReading != null
     var tocSheetVisible by remember(documentId) { mutableStateOf(false) }
     val lazyParagraphs = viewModel.paragraphs.collectAsLazyPagingItems()
@@ -521,12 +524,16 @@ private fun ReaderScreen(
     var programmaticScroll by remember { mutableStateOf(false) }
     var seekFraction by remember(documentId) { mutableStateOf(0f) }
     var isSeeking by remember(documentId) { mutableStateOf(false) }
+    var chromeVisible by rememberSaveable { mutableStateOf(true) }
 
     LaunchedEffect(documentId) {
         viewModel.load(documentId)
     }
     LaunchedEffect(settings.followSpokenText) {
         followEnabled = settings.followSpokenText
+    }
+    LaunchedEffect(inReadMode) {
+        if (inReadMode) chromeVisible = true
     }
     LaunchedEffect(currentAbsoluteOffset, totalCharacterCount) {
         if (!isSeeking) {
@@ -565,34 +572,36 @@ private fun ReaderScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(document?.title ?: stringResource(R.string.reader_title), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = stringResource(R.string.back)) }
-                },
-                actions = {
-                    if (document?.mimeType == EPUB_MIME_TYPE) {
-                        if (inReadMode) {
-                            IconButton(onClick = { tocSheetVisible = true }) {
-                                Icon(Icons.Outlined.Toc, contentDescription = stringResource(R.string.table_of_contents))
-                            }
-                            IconButton(onClick = viewModel::exitReadMode) {
-                                Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.close_read_mode))
-                            }
-                        } else {
-                            IconButton(onClick = viewModel::enterReadMode) {
-                                Icon(Icons.Outlined.MenuBook, contentDescription = stringResource(R.string.open_read_mode))
+            if (!inReadMode || chromeVisible) {
+                TopAppBar(
+                    title = {
+                        Text(document?.title ?: stringResource(R.string.reader_title), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = stringResource(R.string.back)) }
+                    },
+                    actions = {
+                        if (document?.mimeType == EPUB_MIME_TYPE) {
+                            if (inReadMode) {
+                                IconButton(onClick = { tocSheetVisible = true }) {
+                                    Icon(Icons.Outlined.Toc, contentDescription = stringResource(R.string.table_of_contents))
+                                }
+                                IconButton(onClick = viewModel::exitReadMode) {
+                                    Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.close_read_mode))
+                                }
+                            } else {
+                                IconButton(onClick = viewModel::enterReadMode) {
+                                    Icon(Icons.Outlined.MenuBook, contentDescription = stringResource(R.string.open_read_mode))
+                                }
                             }
                         }
+                        IconButton(onClick = onOpenSettings) { Icon(Icons.Outlined.Settings, contentDescription = stringResource(R.string.settings_title)) }
                     }
-                    IconButton(onClick = onOpenSettings) { Icon(Icons.Outlined.Settings, contentDescription = stringResource(R.string.settings_title)) }
-                }
-            )
+                )
+            }
         },
         bottomBar = {
-            if (loadState == ReaderLoadState.Ready) {
+            if ((!inReadMode || chromeVisible) && loadState == ReaderLoadState.Ready) {
                 ReaderControls(
                     narration = narration,
                     playing = playing,
@@ -607,7 +616,7 @@ private fun ReaderScreen(
                             // foreground-service deadline before narration has entered Playing.
                             context.startService(serviceIntent)
                         }
-                        if (narration is NarrationState.Completed) viewModel.restart() else if (playing) viewModel.pause() else viewModel.play()
+                        if (narration is NarrationState.Completed) viewModel.restart() else if (playing) viewModel.pause() else if (inReadMode) viewModel.playFromCurrentPage() else viewModel.play()
                     }
                 )
             }
@@ -653,31 +662,33 @@ private fun ReaderScreen(
                         .coerceIn(0, 100)
                     Box(Modifier.fillMaxSize().padding(padding)) {
                         Column(Modifier.fillMaxSize()) {
-                            Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 10.dp)) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(stringResource(R.string.book_progress), style = MaterialTheme.typography.labelLarge)
-                                    Text(stringResource(R.string.book_percentage, percentage), style = MaterialTheme.typography.labelLarge)
+                            if (!inReadMode || chromeVisible) {
+                                Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 10.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(stringResource(R.string.book_progress), style = MaterialTheme.typography.labelLarge)
+                                        Text(stringResource(R.string.book_percentage, percentage), style = MaterialTheme.typography.labelLarge)
+                                    }
+                                    Slider(
+                                        value = seekFraction,
+                                        onValueChange = {
+                                            isSeeking = true
+                                            seekFraction = it
+                                        },
+                                        onValueChangeFinished = {
+                                            val targetOffset = (
+                                                seekFraction * currentDocument.totalCharacterCount.toFloat()
+                                            ).roundToLong()
+                                            isSeeking = false
+                                            if (settings.followSpokenText) followEnabled = true
+                                            viewModel.seekToAbsoluteOffset(targetOffset)
+                                        },
+                                        enabled = currentDocument.totalCharacterCount > 0L,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
                                 }
-                                Slider(
-                                    value = seekFraction,
-                                    onValueChange = {
-                                        isSeeking = true
-                                        seekFraction = it
-                                    },
-                                    onValueChangeFinished = {
-                                        val targetOffset = (
-                                            seekFraction * currentDocument.totalCharacterCount.toFloat()
-                                        ).roundToLong()
-                                        isSeeking = false
-                                        if (settings.followSpokenText) followEnabled = true
-                                        viewModel.seekToAbsoluteOffset(targetOffset)
-                                    },
-                                    enabled = currentDocument.totalCharacterCount > 0L,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
                             }
                             playbackError?.let { error ->
                                 PlaybackErrorCard(
@@ -696,7 +707,16 @@ private fun ReaderScreen(
                                         unavailable = readingState.unavailable,
                                         fontSizeSp = settings.readerFontSizeSp,
                                         lineHeight = settings.lineHeight,
+                                        chromeVisible = chromeVisible,
+                                        pageIndex = readerPageIndex,
+                                        jumpTarget = readerJumpTarget,
+                                        onNextPage = viewModel::nextReaderPage,
+                                        onPreviousPage = viewModel::previousReaderPage,
+                                        onPageCountChange = viewModel::setReaderPageCount,
+                                        onPageAnchorChanged = viewModel::setPageAnchor,
+                                        onJumpTargetResolved = viewModel::resolveReaderJump,
                                         onRetry = viewModel::retryCurrentSpine,
+                                        onToggleChrome = { chromeVisible = !chromeVisible },
                                         loadImageBytes = viewModel::imageBytes,
                                         modifier = Modifier.weight(1f)
                                     )
@@ -836,7 +856,7 @@ private fun ReaderControls(
                 Icon(
                     Icons.Outlined.FastRewind,
                     contentDescription = stringResource(
-                        if (reading) R.string.previous_chapter else R.string.rewind
+                        if (reading) R.string.previous_page else R.string.rewind
                     )
                 )
             }
@@ -876,7 +896,7 @@ private fun ReaderControls(
                 Icon(
                     Icons.Outlined.FastForward,
                     contentDescription = stringResource(
-                        if (reading) R.string.next_chapter else R.string.fast_forward
+                        if (reading) R.string.next_page else R.string.fast_forward
                     )
                 )
             }

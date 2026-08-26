@@ -91,3 +91,24 @@ data class ReadingProgressEntity(
     val updatedAt: Long,
     @ColumnInfo(name = "completed") val isCompleted: Boolean
 )
+
+/**
+ * The visual read-mode position of a document: the spine item (including the
+ * synthesized cover slot) and the packed page the reader was left on.
+ */
+@Entity(
+    tableName = "reader_positions",
+    foreignKeys = [
+        ForeignKey(
+            entity = DocumentEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["documentId"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ]
+)
+data class ReaderPositionEntity(
+    @androidx.room.PrimaryKey val documentId: String,
+    val spineIndex: Int,
+    val pageIndex: Int
+)

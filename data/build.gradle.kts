@@ -20,6 +20,13 @@ android {
     testOptions {
         unitTests.isIncludeAndroidResources = true
     }
+
+    sourceSets {
+        getByName("test") {
+            // MigrationTestHelper reads the exported Room schemas from assets.
+            assets.srcDirs(files("$projectDir/schemas"))
+        }
+    }
 }
 
 kotlin {
@@ -52,4 +59,12 @@ ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
     arg("room.incremental", "true")
     arg("room.expandProjection", "true")
+}
+
+// The migration tests read the exported Room schemas from test assets, so the
+// asset merge must not run before KSP has written the latest schema JSONs.
+tasks.configureEach {
+    if (name == "mergeDebugUnitTestAssets") {
+        dependsOn("kspDebugKotlin")
+    }
 }

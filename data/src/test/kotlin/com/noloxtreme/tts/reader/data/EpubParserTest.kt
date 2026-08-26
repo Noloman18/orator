@@ -180,6 +180,62 @@ class EpubParserTest {
     }
 
     @Test
+    fun pageBreakMarkersAreExcludedFromNarrationText() {
+        val file = buildEpub(
+            "mimetype" to "application/epub+zip",
+            containerXml(),
+            opf2(
+                spineRefs = listOf("c1"),
+                manifest = """<item id="c1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>"""
+            ),
+            "OEBPS/chapter1.xhtml" to xhtml(
+                """<p>Before.</p><span epub:type="pagebreak" title="2"/><p>After.</p>"""
+            )
+        )
+
+        assertEquals(
+            listOf("Before.", "After."),
+            blocks(file).map { it.text }
+        )
+    }
+
+    @Test
+    fun narrationMatchesVisualBlocksForNestedStructuresWithoutDuplication() {
+        // The narration stream is derived from the same block extractor as the
+        // visual reader, so a blockquote that wraps a paragraph and nested
+        // lists are each spoken exactly once. This is what keeps page offsets
+        // aligned between the two readers.
+        val file = buildEpub(
+            "mimetype" to "application/epub+zip",
+            containerXml(),
+            opf2(
+                spineRefs = listOf("c1"),
+                manifest = """<item id="c1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>"""
+            ),
+            "OEBPS/chapter1.xhtml" to xhtml(
+                """
+                <p>Intro.</p>
+                <blockquote><p>Quoted line.</p></blockquote>
+                <ul><li>First item<ul><li>Nested item</li></ul></li><li>Second item</li></ul>
+                <p>Outro.</p>
+                """.trim()
+            )
+        )
+
+        assertEquals(
+            listOf(
+                "Intro.",
+                "Quoted line.",
+                "First item",
+                "Nested item",
+                "Second item",
+                "Outro."
+            ),
+            blocks(file).map { it.text }
+        )
+    }
+
+    @Test
     fun epub2GuideTocIsUsedAsLabelFallback() {
         val opf = """
             <?xml version="1.0"?>

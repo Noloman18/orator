@@ -87,7 +87,8 @@ internal class ZipEpubBookStore @Inject constructor(
                         title = spineTitle(body, book.navLabels[item.href]),
                         blocks = XhtmlBlockExtractor.extract(
                             body,
-                            basePath = item.href.substringBeforeLast('/', "")
+                            basePath = item.href.substringBeforeLast('/', ""),
+                            pageReferences = book.pageReferences.filter { it.href == item.href }
                         )
                     )
                 }

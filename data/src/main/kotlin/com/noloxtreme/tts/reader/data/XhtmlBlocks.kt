@@ -22,16 +22,28 @@ private const val BULLET_MARKER = "\u2022"
  */
 internal object XhtmlBlockExtractor {
 
-    fun extract(body: Element, basePath: String): List<EpubBlock> {
+    fun extract(
+        body: Element,
+        basePath: String,
+        pageReferences: List<EpubPageReference> = emptyList()
+    ): List<EpubBlock> {
         val blocks = ArrayList<EpubBlock>()
         val pending = ArrayList<EpubRun>()
-        walkContainer(body, basePath, blocks, pending)
+        val pageLabelsByAnchor = pageReferences
+            .filter { it.fragment != null }
+            .associate { it.fragment!! to it.label }
+        pageReferences.firstOrNull { it.fragment == null }?.label?.let { label ->
+            blocks += EpubBlock.PageNumber(label)
+        }
+        walkContainer(body, basePath, pageLabelsByAnchor, blocks, pending)
         flushRuns(pending, blocks) { runs -> EpubBlock.Paragraph(runs) }
         return blocks.filter(::isRenderable)
     }
 
     private fun isRenderable(block: EpubBlock): Boolean = when (block) {
-        is EpubBlock.Image, EpubBlock.Divider -> true
+        is EpubBlock.Image -> true
+        is EpubBlock.PageNumber -> true
+        EpubBlock.Divider -> true
         is EpubBlock.Heading -> block.runs.hasVisibleText()
         is EpubBlock.Paragraph -> block.runs.hasVisibleText()
         is EpubBlock.Quote -> block.runs.hasVisibleText()
@@ -41,13 +53,20 @@ internal object XhtmlBlockExtractor {
     private fun walkContainer(
         container: Element,
         basePath: String,
+        pageLabelsByAnchor: Map<String, String>,
         blocks: MutableList<EpubBlock>,
         pending: MutableList<EpubRun>
     ) {
         for (child in container.childNodes()) {
             when (child) {
                 is TextNode -> appendRun(pending, child.text(), bold = false, italic = false)
-                is Element -> walkBlockElement(child, basePath, blocks, pending)
+                is Element -> walkBlockElement(
+                    child,
+                    basePath,
+                    pageLabelsByAnchor,
+                    blocks,
+                    pending
+                )
             }
         }
     }
@@ -55,9 +74,15 @@ internal object XhtmlBlockExtractor {
     private fun walkBlockElement(
         element: Element,
         basePath: String,
+        pageLabelsByAnchor: Map<String, String>,
         blocks: MutableList<EpubBlock>,
         pending: MutableList<EpubRun>
     ) {
+        pageMarkerFor(element, pageLabelsByAnchor)?.let { marker ->
+            flushRuns(pending, blocks) { runs -> EpubBlock.Paragraph(runs) }
+            addPageMarker(blocks, marker)
+        }
+        if (isEpubPageBreak(element)) return
         when (element.tagName().lowercase(Locale.ROOT)) {
             in SKIP_TAGS -> Unit
             "br" -> appendRun(pending, " ", bold = false, italic = false)
@@ -72,51 +97,75 @@ internal object XhtmlBlockExtractor {
             "h1", "h2", "h3", "h4", "h5", "h6" -> {
                 flushRuns(pending, blocks) { runs -> EpubBlock.Paragraph(runs) }
                 val level = element.tagName().substring(1).toInt()
-                emitInline(element, basePath, blocks) { runs -> EpubBlock.Heading(level, runs) }
+                emitInline(element, basePath, pageLabelsByAnchor, blocks) { runs ->
+                    EpubBlock.Heading(level, runs)
+                }
             }
             "p", "pre" -> {
                 flushRuns(pending, blocks) { runs -> EpubBlock.Paragraph(runs) }
-                emitInline(element, basePath, blocks) { runs -> EpubBlock.Paragraph(runs) }
+                emitInline(element, basePath, pageLabelsByAnchor, blocks) { runs ->
+                    EpubBlock.Paragraph(runs)
+                }
             }
             "blockquote" -> {
                 flushRuns(pending, blocks) { runs -> EpubBlock.Paragraph(runs) }
-                emitInline(element, basePath, blocks) { runs -> EpubBlock.Quote(runs) }
+                emitInline(element, basePath, pageLabelsByAnchor, blocks) { runs ->
+                    EpubBlock.Quote(runs)
+                }
             }
             "ul", "ol" -> {
                 flushRuns(pending, blocks) { runs -> EpubBlock.Paragraph(runs) }
-                walkList(element, basePath, blocks)
+                walkList(element, basePath, pageLabelsByAnchor, blocks)
             }
             "table" -> {
                 flushRuns(pending, blocks) { runs -> EpubBlock.Paragraph(runs) }
-                walkTable(element, basePath, blocks)
+                walkTable(element, basePath, pageLabelsByAnchor, blocks)
             }
-            else -> walkContainer(element, basePath, blocks, pending)
+            else -> walkContainer(element, basePath, pageLabelsByAnchor, blocks, pending)
         }
     }
 
-    private fun walkList(list: Element, basePath: String, blocks: MutableList<EpubBlock>) {
+    private fun walkList(
+        list: Element,
+        basePath: String,
+        pageLabelsByAnchor: Map<String, String>,
+        blocks: MutableList<EpubBlock>
+    ) {
         val ordered = list.tagName().equals("ol", ignoreCase = true)
         var marker = 0
         for (item in list.children()) {
             if (!item.tagName().equals("li", ignoreCase = true)) continue
             marker += 1
             val label = if (ordered) "$marker." else BULLET_MARKER
-            emitInline(item, basePath, blocks, skipTags = setOf("ul", "ol")) { runs ->
+            emitInline(
+                item,
+                basePath,
+                pageLabelsByAnchor,
+                blocks,
+                skipTags = setOf("ul", "ol")
+            ) { runs ->
                 EpubBlock.ListItem(ordered = ordered, marker = label, runs = runs)
             }
             for (nested in item.children()) {
                 val nestedTag = nested.tagName().lowercase(Locale.ROOT)
                 if (nestedTag == "ul" || nestedTag == "ol") {
-                    walkList(nested, basePath, blocks)
+                    walkList(nested, basePath, pageLabelsByAnchor, blocks)
                 }
             }
         }
     }
 
-    private fun walkTable(table: Element, basePath: String, blocks: MutableList<EpubBlock>) {
+    private fun walkTable(
+        table: Element,
+        basePath: String,
+        pageLabelsByAnchor: Map<String, String>,
+        blocks: MutableList<EpubBlock>
+    ) {
         for (row in table.select("tr")) {
             for (cell in row.select("th,td")) {
-                emitInline(cell, basePath, blocks) { runs -> EpubBlock.Paragraph(runs) }
+                emitInline(cell, basePath, pageLabelsByAnchor, blocks) { runs ->
+                    EpubBlock.Paragraph(runs)
+                }
             }
         }
     }
@@ -130,6 +179,7 @@ internal object XhtmlBlockExtractor {
     private fun emitInline(
         element: Element,
         basePath: String,
+        pageLabelsByAnchor: Map<String, String>,
         blocks: MutableList<EpubBlock>,
         skipTags: Set<String> = emptySet(),
         toBlock: (List<EpubRun>) -> EpubBlock
@@ -140,6 +190,11 @@ internal object XhtmlBlockExtractor {
             when (node) {
                 is TextNode -> appendRun(runs, node.text(), bold, italic)
                 is Element -> {
+                    pageMarkerFor(node, pageLabelsByAnchor)?.let { marker ->
+                        flushRuns(runs, blocks, toBlock)
+                        addPageMarker(blocks, marker)
+                    }
+                    if (isEpubPageBreak(node)) return
                     val tag = node.tagName().lowercase(Locale.ROOT)
                     when {
                         tag in SKIP_TAGS || tag in skipTags -> Unit
@@ -166,6 +221,30 @@ internal object XhtmlBlockExtractor {
         flushRuns(runs, blocks, toBlock)
     }
 
+    private fun pageMarkerFor(
+        element: Element,
+        pageLabelsByAnchor: Map<String, String>
+    ): EpubBlock.PageNumber? {
+        val anchor = element.id().trim().ifBlank { element.attr("name").trim() }
+        val label = pageLabelsByAnchor[anchor]
+            ?: if (isEpubPageBreak(element)) {
+                element.text().trim()
+                    .ifBlank { element.attr("aria-label").trim() }
+                    .ifBlank { element.attr("title").trim() }
+                    .ifBlank { element.attr("data-page").trim() }
+            } else {
+                ""
+            }
+        return label.takeIf { it.isNotBlank() }?.let(EpubBlock::PageNumber)
+    }
+
+    private fun addPageMarker(
+        blocks: MutableList<EpubBlock>,
+        marker: EpubBlock.PageNumber
+    ) {
+        if (blocks.lastOrNull() != marker) blocks += marker
+    }
+
     private fun addImage(element: Element, basePath: String, blocks: MutableList<EpubBlock>) {
         resolveResourcePath(basePath, element.attr("src"))?.let { path ->
             blocks += EpubBlock.Image(
@@ -173,6 +252,25 @@ internal object XhtmlBlockExtractor {
                 contentDescription = element.attr("alt").trim().ifEmpty { null }
             )
         }
+    }
+}
+
+/** EPUB page-break semantics are visual metadata, not narration text. */
+internal fun isEpubPageBreak(element: Element): Boolean {
+    val tokens = sequenceOf(
+        element.attr("epub:type"),
+        element.attr("role"),
+        element.classNames().joinToString(" ")
+    ).flatMap { value ->
+        value.split(Regex("""[\s,]+"""))
+            .asSequence()
+            .filter { it.isNotBlank() }
+    }
+    return tokens.any { token ->
+        token.equals("pagebreak", ignoreCase = true) ||
+            token.equals("page-break", ignoreCase = true) ||
+            token.equals("doc-pagebreak", ignoreCase = true) ||
+            token.equals("doc-page-break", ignoreCase = true)
     }
 }
 
