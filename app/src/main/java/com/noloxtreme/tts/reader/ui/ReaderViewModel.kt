@@ -178,13 +178,8 @@ class ReaderViewModel @Inject constructor(
 
     val narration: StateFlow<NarrationState> = narrationController.state
 
-    sealed interface ExportMessage {
-        data class Succeeded(val displayName: String) : ExportMessage
-        data class Failed(val error: ExportError, val detail: String? = null) : ExportMessage
-    }
-
     private val mutableExportMessages = MutableSharedFlow<ExportMessage>(extraBufferCapacity = 8)
-    private val emittedExportKeys = mutableSetOf<String>()
+    private val exportMessageGate = ExportMessageGate()
 
     /** Background export state for the loaded document; [ExportState.Idle] when none. */
     val exportState: StateFlow<ExportState> = pageRequest
@@ -207,24 +202,8 @@ class ReaderViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             exportState.collect { state ->
-                val id = pageRequest.value
-                when (state) {
-                    ExportState.Enqueued, is ExportState.Running -> {
-                        emittedExportKeys.removeAll { it.startsWith("$id:") }
-                    }
-                    is ExportState.Succeeded -> {
-                        if (emittedExportKeys.add("$id:succeeded")) {
-                            mutableExportMessages.tryEmit(ExportMessage.Succeeded(state.displayName))
-                        }
-                    }
-                    is ExportState.Failed -> {
-                        if (emittedExportKeys.add("$id:failed:${state.error.name}")) {
-                            mutableExportMessages.tryEmit(
-                                ExportMessage.Failed(state.error, state.detail)
-                            )
-                        }
-                    }
-                    else -> Unit
+                exportMessageGate.onState(state)?.let { message ->
+                    mutableExportMessages.tryEmit(message)
                 }
             }
         }

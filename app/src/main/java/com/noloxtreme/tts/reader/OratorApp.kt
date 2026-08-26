@@ -127,6 +127,7 @@ import com.noloxtreme.tts.reader.designsystem.R as DesignSystemR
 import com.noloxtreme.tts.reader.export.R as ExportR
 import com.noloxtreme.tts.reader.playback.NarrationService
 import com.noloxtreme.tts.reader.ui.AppViewModel
+import com.noloxtreme.tts.reader.ui.ExportMessage
 import com.noloxtreme.tts.reader.ui.LibraryViewModel
 import com.noloxtreme.tts.reader.ui.LibraryLoadState
 import com.noloxtreme.tts.reader.ui.ReaderViewModel
@@ -564,10 +565,10 @@ private fun ReaderScreen(
     LaunchedEffect(Unit) {
         viewModel.exportMessages.collect { message ->
             when (message) {
-                is ReaderViewModel.ExportMessage.Succeeded -> exportSnackbar.showSnackbar(
+                is ExportMessage.Succeeded -> exportSnackbar.showSnackbar(
                     context.getString(R.string.export_succeeded, message.displayName)
                 )
-                is ReaderViewModel.ExportMessage.Failed -> exportSnackbar.showSnackbar(
+                is ExportMessage.Failed -> exportSnackbar.showSnackbar(
                     context.getString(
                         R.string.export_failed_reason,
                         exportErrorMessage(context, message.error) +
