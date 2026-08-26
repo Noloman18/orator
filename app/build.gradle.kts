@@ -97,6 +97,7 @@ dependencies {
     implementation(libs.androidx.hilt.android)
     implementation(libs.androidx.coroutines.android)
     ksp(libs.androidx.hilt.compiler)
+    ksp(libs.androidx.hilt.work.compiler)
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)

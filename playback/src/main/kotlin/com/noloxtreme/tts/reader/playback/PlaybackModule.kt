@@ -33,6 +33,11 @@ object PlaybackModule {
 
     @Provides
     @Singleton
+    fun bindFileSynthesizer(implementation: AndroidTtsFileSynthesizer): FileSynthesizer =
+        implementation
+
+    @Provides
+    @Singleton
     fun bindNarrationController(implementation: NarrationCoordinator): NarrationController =
         implementation
 }

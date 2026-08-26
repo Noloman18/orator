@@ -32,6 +32,9 @@ dependencies {
     implementation(libs.androidx.media3.extractor)
     implementation(libs.androidx.hilt.android)
     ksp(libs.androidx.hilt.compiler)
+    // androidx.hilt's KSP processor: registers @HiltWorker classes with
+    // HiltWorkerFactory. Without it the worker is silently never wired up.
+    ksp(libs.androidx.hilt.work.compiler)
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
 }

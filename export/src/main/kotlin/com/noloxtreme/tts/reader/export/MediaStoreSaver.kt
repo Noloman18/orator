@@ -26,7 +26,7 @@ class MediaStoreSaver @Inject constructor(
 
     sealed interface SaveResult {
         data class Saved(val uri: String, val displayName: String) : SaveResult
-        data class Failed(val error: ExportError) : SaveResult
+        data class Failed(val error: ExportError, val detail: String? = null) : SaveResult
     }
 
     suspend fun publish(sourceFile: File, bookTitle: String): SaveResult =
@@ -39,7 +39,7 @@ class MediaStoreSaver @Inject constructor(
                     publishLegacy(sourceFile, displayName)
                 }
             } catch (error: Throwable) {
-                SaveResult.Failed(ExportError.STORAGE_FAILED)
+                SaveResult.Failed(ExportError.STORAGE_FAILED, describe(error))
             }
         }
 
@@ -70,7 +70,7 @@ class MediaStoreSaver @Inject constructor(
             return SaveResult.Saved(uri.toString(), displayName)
         } catch (error: Throwable) {
             resolver.delete(uri, null, null)
-            return SaveResult.Failed(ExportError.STORAGE_FAILED)
+            return SaveResult.Failed(ExportError.STORAGE_FAILED, describe(error))
         }
     }
 
@@ -95,8 +95,15 @@ class MediaStoreSaver @Inject constructor(
         return (cleaned.ifBlank { "Orator Export" }.take(80)) + ".m4a"
     }
 
+    private fun describe(error: Throwable): String {
+        val message = error.message?.trim().orEmpty()
+            .ifBlank { error.javaClass.simpleName }
+        return "${error.javaClass.simpleName}: $message".take(MAX_DETAIL_CHARS)
+    }
+
     private companion object {
         const val EXPORT_DIRECTORY = "Music/Orator"
         const val AUDIO_MIME_TYPE = "audio/mp4"
+        const val MAX_DETAIL_CHARS = 300
     }
 }
