@@ -1,8 +1,11 @@
 package com.noloxtreme.tts.reader
 
+import android.Manifest
 import android.content.ContentResolver
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -34,10 +37,10 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.FastForward
 import androidx.compose.material.icons.outlined.FastRewind
 import androidx.compose.material.icons.outlined.MenuBook
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.Replay
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SkipNext
 import androidx.compose.material.icons.outlined.SkipPrevious
 import androidx.compose.material.icons.outlined.Toc
@@ -48,8 +51,11 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -100,10 +106,13 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.paging.compose.collectAsLazyPagingItems
+import androidx.core.content.ContextCompat
 import com.noloxtreme.tts.reader.domain.Document
 import com.noloxtreme.tts.reader.domain.DocumentId
 import com.noloxtreme.tts.reader.domain.DocumentPosition
 import com.noloxtreme.tts.reader.domain.EPUB_MIME_TYPE
+import com.noloxtreme.tts.reader.domain.ExportError
+import com.noloxtreme.tts.reader.domain.ExportState
 import com.noloxtreme.tts.reader.domain.ImportError
 import com.noloxtreme.tts.reader.domain.ImportSource
 import com.noloxtreme.tts.reader.domain.ImportState
@@ -115,6 +124,7 @@ import com.noloxtreme.tts.reader.domain.ThemePreference
 import com.noloxtreme.tts.reader.designsystem.BookPlaceholder
 import com.noloxtreme.tts.reader.designsystem.OratorDesignTokens
 import com.noloxtreme.tts.reader.designsystem.R as DesignSystemR
+import com.noloxtreme.tts.reader.export.R as ExportR
 import com.noloxtreme.tts.reader.playback.NarrationService
 import com.noloxtreme.tts.reader.ui.AppViewModel
 import com.noloxtreme.tts.reader.ui.LibraryViewModel
@@ -278,9 +288,7 @@ private fun LibraryScreen(
             CenterAlignedTopAppBar(
                 title = { Text(stringResource(R.string.library_title), fontWeight = FontWeight.SemiBold) },
                 actions = {
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Outlined.Settings, contentDescription = stringResource(R.string.settings_title))
-                    }
+                    LibraryMoreMenu(onOpenSettings)
                 }
             )
         },
@@ -526,6 +534,49 @@ private fun ReaderScreen(
     var isSeeking by remember(documentId) { mutableStateOf(false) }
     var chromeVisible by rememberSaveable { mutableStateOf(true) }
 
+    val exportState by viewModel.exportState.collectAsState()
+    val exportSnackbar = remember { SnackbarHostState() }
+    val notificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { viewModel.exportAudio() }
+    val storagePermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { viewModel.exportAudio() }
+    val requestExport: () -> Unit = {
+        when {
+            Build.VERSION.SDK_INT >= 33 &&
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED ->
+                notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+
+            Build.VERSION.SDK_INT < 29 &&
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE
+                ) != PackageManager.PERMISSION_GRANTED ->
+                storagePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+
+            else -> viewModel.exportAudio()
+        }
+    }
+    LaunchedEffect(Unit) {
+        viewModel.exportMessages.collect { message ->
+            when (message) {
+                is ReaderViewModel.ExportMessage.Succeeded -> exportSnackbar.showSnackbar(
+                    context.getString(R.string.export_succeeded, message.displayName)
+                )
+                is ReaderViewModel.ExportMessage.Failed -> exportSnackbar.showSnackbar(
+                    context.getString(
+                        R.string.export_failed_reason,
+                        exportErrorMessage(context, message.error)
+                    )
+                )
+            }
+        }
+    }
+
     LaunchedEffect(documentId) {
         viewModel.load(documentId)
     }
@@ -595,11 +646,17 @@ private fun ReaderScreen(
                                 }
                             }
                         }
-                        IconButton(onClick = onOpenSettings) { Icon(Icons.Outlined.Settings, contentDescription = stringResource(R.string.settings_title)) }
+                        ExportAndSettingsMenu(
+                            exportState = exportState,
+                            onExport = requestExport,
+                            onCancelExport = viewModel::cancelExport,
+                            onOpenSettings = onOpenSettings
+                        )
                     }
                 )
             }
         },
+        snackbarHost = { SnackbarHost(exportSnackbar) },
         bottomBar = {
             if ((!inReadMode || chromeVisible) && loadState == ReaderLoadState.Ready) {
                 ReaderControls(
@@ -662,6 +719,14 @@ private fun ReaderScreen(
                         .coerceIn(0, 100)
                     Box(Modifier.fillMaxSize().padding(padding)) {
                         Column(Modifier.fillMaxSize()) {
+                            if (exportState is ExportState.Running || exportState is ExportState.Enqueued) {
+                                LinearProgressIndicator(
+                                    progress = {
+                                        ((exportState as? ExportState.Running)?.percent ?: 0) / 100f
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
                             if (!inReadMode || chromeVisible) {
                                 Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 10.dp)) {
                                     Row(
@@ -1156,4 +1221,89 @@ private fun NarrationState.positionFor(documentId: DocumentId): DocumentPosition
     is NarrationState.Playing -> safePosition.takeIf { this.documentId == documentId }
     is NarrationState.Paused -> resumePosition.takeIf { this.documentId == documentId }
     else -> null
+}
+
+@Composable
+private fun LibraryMoreMenu(onOpenSettings: () -> Unit) {
+    var menuOpen by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { menuOpen = true }) {
+            Icon(Icons.Outlined.MoreVert, contentDescription = stringResource(R.string.more_actions))
+        }
+        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.settings_title)) },
+                onClick = {
+                    menuOpen = false
+                    onOpenSettings()
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExportAndSettingsMenu(
+    exportState: ExportState,
+    onExport: () -> Unit,
+    onCancelExport: () -> Unit,
+    onOpenSettings: () -> Unit
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { menuOpen = true }) {
+            Icon(Icons.Outlined.MoreVert, contentDescription = stringResource(R.string.more_actions))
+        }
+        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            val exporting = exportState is ExportState.Enqueued ||
+                exportState is ExportState.Running
+            if (exporting) {
+                val percent = (exportState as? ExportState.Running)?.percent ?: 0
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.export_progress_menu, percent)) },
+                    onClick = {},
+                    enabled = false
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.export_cancel_menu)) },
+                    onClick = {
+                        menuOpen = false
+                        onCancelExport()
+                    }
+                )
+            } else {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.export_audio)) },
+                    onClick = {
+                        menuOpen = false
+                        onExport()
+                    }
+                )
+            }
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.settings_title)) },
+                onClick = {
+                    menuOpen = false
+                    onOpenSettings()
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun exportErrorMessage(error: ExportError): String = exportErrorMessage(
+    LocalContext.current,
+    error
+)
+
+private fun exportErrorMessage(context: Context, error: ExportError): String = when (error) {
+    ExportError.DOCUMENT_MISSING -> context.getString(ExportR.string.export_error_document_missing)
+    ExportError.TTS_UNAVAILABLE -> context.getString(ExportR.string.export_error_tts_unavailable)
+    ExportError.TTS_LANGUAGE_MISSING -> context.getString(ExportR.string.export_error_language_missing)
+    ExportError.SYNTHESIS_FAILED -> context.getString(ExportR.string.export_error_synthesis_failed)
+    ExportError.ENCODING_FAILED -> context.getString(ExportR.string.export_error_encoding_failed)
+    ExportError.STORAGE_FAILED -> context.getString(ExportR.string.export_error_storage_failed)
+    ExportError.UNKNOWN -> context.getString(ExportR.string.export_error_unknown)
 }

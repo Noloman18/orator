@@ -23,5 +23,5 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "Orator"
-include(":app", ":domain", ":data", ":playback", ":designsystem")
+include(":app", ":domain", ":data", ":playback", ":export", ":designsystem")
  

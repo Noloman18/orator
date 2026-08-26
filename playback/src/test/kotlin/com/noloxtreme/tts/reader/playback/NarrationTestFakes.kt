@@ -157,6 +157,9 @@ internal class FakeContentRepository(
     override suspend fun section(id: DocumentId, index: Int): com.noloxtreme.tts.reader.domain.Section? =
         null
 
+    override suspend fun allParagraphs(id: DocumentId): List<Paragraph> =
+        paragraphsByIndex.toSortedMap().values.toList()
+
     override suspend fun sentenceBefore(
         id: DocumentId,
         position: DocumentPosition

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="export_channel_progress">Audio export progress</string>
+    <string name="export_channel_completion">Audio export finished</string>
+    <string name="export_notification_title">Exporting %1$s</string>
+    <string name="export_notification_percent">%1$d%%</string>
+    <string name="export_cancel_action">Cancel</string>
+    <string name="export_done_title">Export complete</string>
+    <string name="export_done_text">%1$s is ready</string>
+    <string name="export_failed_title">Export failed</string>
+    <string name="export_failed_text">%1$s</string>
+    <string name="export_error_document_missing">The book is no longer available.</string>
+    <string name="export_error_tts_unavailable">No text-to-speech engine is available.</string>
+    <string name="export_error_language_missing">The book\'s language is not available for this voice.</string>
+    <string name="export_error_synthesis_failed">Speech synthesis failed.</string>
+    <string name="export_error_encoding_failed">Audio encoding failed.</string>
+    <string name="export_error_storage_failed">The file could not be saved to storage.</string>
+    <string name="export_error_unknown">Something went wrong.</string>
+</resources>

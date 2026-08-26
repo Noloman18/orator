@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.paging.PagingData
 import androidx.paging.cachedIn
 import com.noloxtreme.tts.reader.domain.ContentRepository
+import com.noloxtreme.tts.reader.domain.AudioExporter
 import com.noloxtreme.tts.reader.domain.Document
 import com.noloxtreme.tts.reader.domain.DocumentId
 import com.noloxtreme.tts.reader.domain.DocumentPosition
@@ -12,6 +13,8 @@ import com.noloxtreme.tts.reader.domain.EPUB_MIME_TYPE
 import com.noloxtreme.tts.reader.domain.EpubBlock
 import com.noloxtreme.tts.reader.domain.EpubSpineContent
 import com.noloxtreme.tts.reader.domain.EpubTocEntry
+import com.noloxtreme.tts.reader.domain.ExportError
+import com.noloxtreme.tts.reader.domain.ExportState
 import com.noloxtreme.tts.reader.domain.FAST_JUMP_SENTENCE_COUNT
 import com.noloxtreme.tts.reader.domain.NarrationCommand
 import com.noloxtreme.tts.reader.domain.NarrationController
@@ -46,13 +49,17 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
@@ -97,7 +104,8 @@ class ReaderViewModel @Inject constructor(
     private val loadImageResource: LoadImageResource,
     private val observeReaderPosition: ObserveReaderPosition,
     private val saveReaderPosition: SaveReaderPosition,
-    val narrationController: NarrationController
+    val narrationController: NarrationController,
+    private val audioExporter: AudioExporter
 ) : ViewModel() {
     private val pageRequest = MutableStateFlow<DocumentId?>(null)
     private val initialParagraph = MutableStateFlow(0)
@@ -169,6 +177,56 @@ class ReaderViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), OratorSettings())
 
     val narration: StateFlow<NarrationState> = narrationController.state
+
+    sealed interface ExportMessage {
+        data class Succeeded(val displayName: String) : ExportMessage
+        data class Failed(val error: ExportError) : ExportMessage
+    }
+
+    private val mutableExportMessages = MutableSharedFlow<ExportMessage>(extraBufferCapacity = 8)
+    private val emittedExportKeys = mutableSetOf<String>()
+
+    /** Background export state for the loaded document; [ExportState.Idle] when none. */
+    val exportState: StateFlow<ExportState> = pageRequest
+        .flatMapLatest { id ->
+            if (id == null) flowOf(ExportState.Idle) else audioExporter.observe(id)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ExportState.Idle)
+
+    /** One-shot snackbar events for terminal export outcomes. */
+    val exportMessages: SharedFlow<ExportMessage> = mutableExportMessages.asSharedFlow()
+
+    fun exportAudio() {
+        pageRequest.value?.let { id -> audioExporter.export(id) }
+    }
+
+    fun cancelExport() {
+        pageRequest.value?.let { id -> audioExporter.cancel(id) }
+    }
+
+    init {
+        viewModelScope.launch {
+            exportState.collect { state ->
+                val id = pageRequest.value
+                when (state) {
+                    ExportState.Enqueued, is ExportState.Running -> {
+                        emittedExportKeys.removeAll { it.startsWith("$id:") }
+                    }
+                    is ExportState.Succeeded -> {
+                        if (emittedExportKeys.add("$id:succeeded")) {
+                            mutableExportMessages.tryEmit(ExportMessage.Succeeded(state.displayName))
+                        }
+                    }
+                    is ExportState.Failed -> {
+                        if (emittedExportKeys.add("$id:failed:${state.error.name}")) {
+                            mutableExportMessages.tryEmit(ExportMessage.Failed(state.error))
+                        }
+                    }
+                    else -> Unit
+                }
+            }
+        }
+    }
 
     val sectionTitle: StateFlow<String?> = combine(pageRequest, narrationController.state) { id, state ->
         id to state

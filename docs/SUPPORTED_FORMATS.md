@@ -1,6 +1,6 @@
 # Supported formats
 
-Orator imports the following formats through Android's system document picker. Parsing is local and produces normalized text for the Reader and Android TextToSpeech; Orator does not upload documents or generate audio files.
+Orator imports the following formats through Android's system document picker. Parsing is local and produces normalized text for the Reader and Android TextToSpeech; Orator does not upload documents. Any imported book can optionally be exported to a local AAC audio file (`Music/Orator`, see ADR 0005); nothing leaves the device.
 
 ## Plain text (`.txt`)
 
@@ -78,4 +78,4 @@ Scanned or image-only PDFs do not contain extractable text and are rejected as h
 
 ## Not supported
 
-DOCX, standalone HTML, RTF, MOBI, Kindle formats, audiobooks, image imports, OCR, DRM removal, cloud/network voices, and permanent audio generation are not supported. Encrypted EPUB and PDF documents are rejected rather than unlocked.
+DOCX, standalone HTML, RTF, MOBI, Kindle formats, audiobooks, image imports, OCR, DRM removal, and cloud/network voices are not supported. Audio generation is never automatic or cloud-based; the only audio output is the user-initiated AAC export of ADR 0005. Encrypted EPUB and PDF documents are rejected rather than unlocked.

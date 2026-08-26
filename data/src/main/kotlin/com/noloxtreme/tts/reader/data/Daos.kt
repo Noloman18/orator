@@ -117,6 +117,15 @@ interface ContentDao {
     )
     suspend fun lastParagraph(documentId: String): ParagraphEntity?
 
+    @Query(
+        """
+        SELECT * FROM paragraphs
+        WHERE documentId = :documentId
+        ORDER BY paragraphIndex
+        """
+    )
+    suspend fun allForDocument(documentId: String): List<ParagraphEntity>
+
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertBatch(paragraphs: List<ParagraphEntity>)
 }

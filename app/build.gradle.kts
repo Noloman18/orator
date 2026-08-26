@@ -39,8 +39,8 @@ android {
         applicationId = "com.noloxtreme.tts.reader"
         minSdk = 24
         targetSdk = 37
-        versionCode = 6
-        versionName = "1.4.0"
+        versionCode = 7
+        versionName = "1.5.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -76,8 +76,11 @@ dependencies {
     implementation(project(":domain"))
     implementation(project(":data"))
     implementation(project(":playback"))
+    implementation(project(":export"))
     implementation(project(":designsystem"))
     implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.hilt.work)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.extended)

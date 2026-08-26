@@ -94,6 +94,9 @@ class RoomContentRepository @Inject constructor(
     override suspend fun section(id: DocumentId, index: Int): Section? =
         sectionDao.get(id.value, index)?.toDomain()
 
+    override suspend fun allParagraphs(id: DocumentId): List<Paragraph> =
+        contentDao.allForDocument(id.value).map(ParagraphEntity::toDomain)
+
     override suspend fun sentenceBefore(
         id: DocumentId,
         position: DocumentPosition

@@ -8,7 +8,7 @@ Current UI technology: Kotlin and Jetpack Compose
 
 Implementation tracking note, updated 2026-08-06: checked items below mean the current repository contains the implementation or local verification evidence. Items that require physical-device playback, release verification, generated artwork, or formal acceptance recording remain unchecked until that work is actually done. The 2026-08-06 review follow-up added explicit Library/Reader loading and missing-document states, character progress, user-controlled follow mode, TTS recovery actions, scoped deletion stop coordination, duplicate-import navigation, and a DI-backed parser registry. ADR 0005 subsequently added Markdown and local, text-extractable PDF import; Compose/device acceptance tests remain pending.
 
-This document is the source of truth for Orator v1. Implement the decisions below as written. Do not substitute a cloud speech service, generate permanent audio files, add formats beyond TXT, Markdown, EPUB, and PDF, or change the persistence model without recording and approving a new architecture decision.
+This document is the source of truth for Orator v1. Implement the decisions below as written. Do not substitute a cloud speech service, add formats beyond TXT, Markdown, EPUB, and PDF, or change the persistence model without recording and approving a new architecture decision. Audio generation is out of scope except for the user-initiated AAC export approved in ADR 0005.
 
 ## 1. Completion rules
 
@@ -58,7 +58,7 @@ Do not implement these in v1:
 - PDF page rendering, forms, annotations, JavaScript, embedded media, or image narration.
 - DRM removal, encrypted EPUB reading, or encrypted/password-protected PDF reading.
 - Cloud TTS or network-based voices.
-- MP3, WAV, or other permanent audio generation.
+- MP3, WAV, or other permanent audio generation. The user-initiated AAC export of ADR 0005 is the only audio-generation feature; it is never automatic or cloud-based.
 - Accounts, cloud sync, cross-device progress, or remote storage.
 - Bookmarks, notes, annotations, search, translation, or dictionary lookup.
 - Embedded EPUB audio, video, scripts, or interactive content.

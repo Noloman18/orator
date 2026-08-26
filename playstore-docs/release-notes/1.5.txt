@@ -1,0 +1,8 @@
+Version 1.5 (build 7)
+
+What's new in this release:
+
+- Export any book to a playable AAC audio file, saved to Music/Orator on your device
+- Exports run in the background: keep reading, switch apps, or turn off the screen while a progress notification tracks the job
+- The export uses the same voice, speed, and pitch as narration, and can be cancelled any time from the notification
+- Settings and the new Export audio action now live in the More menu in the top bar

@@ -222,6 +222,8 @@ interface ContentRepository {
     suspend fun paragraph(id: DocumentId, index: Int): Paragraph?
     suspend fun paragraphContaining(id: DocumentId, absoluteOffset: Long): Paragraph?
     suspend fun section(id: DocumentId, index: Int): Section?
+    /** Every paragraph of the document in narration order; used by full-book audio export. */
+    suspend fun allParagraphs(id: DocumentId): List<Paragraph>
     suspend fun sentenceBefore(id: DocumentId, position: DocumentPosition): DocumentPosition
     suspend fun sentenceAfter(id: DocumentId, position: DocumentPosition): DocumentPosition
 }
