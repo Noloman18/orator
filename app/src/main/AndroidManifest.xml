@@ -63,6 +63,21 @@
             android:name="androidx.work.impl.foreground.SystemForegroundService"
             android:foregroundServiceType="dataSync|mediaProcessing"
             tools:node="merge" />
+        <!-- Disable WorkManager's default androidx.startup initializer so the
+             Configuration.Provider in OratorApplication (HiltWorkerFactory) is
+             used. Without this, WorkManager initializes with its default
+             reflection-based factory and cannot construct Hilt workers
+             (NoSuchMethodException). -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
     </application>
 
 </manifest>
