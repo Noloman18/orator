@@ -88,11 +88,15 @@ class ExportNotifier @Inject constructor(
         notify(COMPLETION_NOTIFICATION_ID, notification)
     }
 
-    fun failedNotification(error: ExportError, bookTitle: String) {
+    fun failedNotification(error: ExportError, bookTitle: String, detail: String? = null) {
+        val text = errorText(error) + detail
+            ?.takeIf { it.isNotBlank() }
+            ?.let { " — $it" }
+            .orEmpty()
         val notification = baseBuilder(COMPLETION_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_notify_error)
             .setContentTitle(context.getString(R.string.export_failed_title))
-            .setContentText(context.getString(R.string.export_failed_text, errorText(error)))
+            .setContentText(context.getString(R.string.export_failed_text, text))
             .setAutoCancel(true)
             .build()
         notify(COMPLETION_NOTIFICATION_ID, notification)

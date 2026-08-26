@@ -19,7 +19,8 @@ sealed interface ExportState {
     /** The finished audio file has been published to device storage. */
     data class Succeeded(val displayName: String, val contentUri: String) : ExportState
 
-    data class Failed(val error: ExportError) : ExportState
+    /** [detail] carries the underlying exception message when one is available. */
+    data class Failed(val error: ExportError, val detail: String? = null) : ExportState
 
     data object Cancelled : ExportState
 }

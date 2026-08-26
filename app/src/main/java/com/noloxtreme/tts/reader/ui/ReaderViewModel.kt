@@ -180,7 +180,7 @@ class ReaderViewModel @Inject constructor(
 
     sealed interface ExportMessage {
         data class Succeeded(val displayName: String) : ExportMessage
-        data class Failed(val error: ExportError) : ExportMessage
+        data class Failed(val error: ExportError, val detail: String? = null) : ExportMessage
     }
 
     private val mutableExportMessages = MutableSharedFlow<ExportMessage>(extraBufferCapacity = 8)
@@ -219,7 +219,9 @@ class ReaderViewModel @Inject constructor(
                     }
                     is ExportState.Failed -> {
                         if (emittedExportKeys.add("$id:failed:${state.error.name}")) {
-                            mutableExportMessages.tryEmit(ExportMessage.Failed(state.error))
+                            mutableExportMessages.tryEmit(
+                                ExportMessage.Failed(state.error, state.detail)
+                            )
                         }
                     }
                     else -> Unit

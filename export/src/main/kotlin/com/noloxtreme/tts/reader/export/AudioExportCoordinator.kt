@@ -58,9 +58,10 @@ class AudioExportCoordinator @Inject constructor(
             contentUri = outputData.getString(ExportKeys.CONTENT_URI).orEmpty()
         )
         WorkInfo.State.FAILED -> ExportState.Failed(
-            outputData.getString(ExportKeys.ERROR)
+            error = outputData.getString(ExportKeys.ERROR)
                 ?.let { name -> runCatching { ExportError.valueOf(name) }.getOrDefault(ExportError.UNKNOWN) }
-                ?: ExportError.UNKNOWN
+                ?: ExportError.UNKNOWN,
+            detail = outputData.getString(ExportKeys.ERROR_DETAIL)
         )
         WorkInfo.State.CANCELLED -> ExportState.Cancelled
         WorkInfo.State.BLOCKED -> ExportState.Enqueued

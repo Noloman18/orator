@@ -50,16 +50,17 @@ class AudioExportWorker @AssistedInject constructor(
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
+        notifier.ensureChannels()
         val documentId = DocumentId(inputData.getString(ExportKeys.DOCUMENT_ID).orEmpty())
         if (documentId.value.isBlank()) return failure(ExportError.DOCUMENT_MISSING)
         val document = documentRepository.getDocument(documentId)
         if (document == null) return failure(ExportError.DOCUMENT_MISSING)
+        bookTitle = document.title
         val chunks = AudioChunker.chunk(
             contentRepository.allParagraphs(documentId).map { it.text }
         )
         if (chunks.isEmpty()) return failure(ExportError.UNKNOWN)
 
-        notifier.ensureChannels()
         val workDir = File(applicationContext.cacheDir, "audio-export/${documentId.value}")
         val segmentsDir = File(workDir, "segments").apply { mkdirs() }
         val stateFile = File(workDir, "next-segment.txt")
@@ -89,7 +90,9 @@ class AudioExportWorker @AssistedInject constructor(
                 if (!wav.exists() || wav.length() == 0L) {
                     val result = synthesizeWithRetry(chunks[index].text, "export-$index", wav, configuration)
                     if (result != SynthesisResult.Success) {
-                        return failure(ExportError.SYNTHESIS_FAILED)
+                        val detail = (result as? SynthesisResult.Failure)
+                            ?.let { "TTS error code ${it.reason}" }
+                        return failure(ExportError.SYNTHESIS_FAILED, detail)
                     }
                 }
                 next = (index + 1).toLong()
@@ -103,8 +106,12 @@ class AudioExportWorker @AssistedInject constructor(
                 File(segmentsDir, "%06d.wav".format(index))
             }
             val output = File(workDir, "export.m4a")
-            if (assembler.assemble(wavFiles, output).isFailure) {
-                return failure(ExportError.ENCODING_FAILED)
+            val assembleResult = assembler.assemble(wavFiles, output)
+            if (assembleResult.isFailure) {
+                return failure(
+                    ExportError.ENCODING_FAILED,
+                    assembleResult.exceptionOrNull()?.message
+                )
             }
             when (val saved = saver.publish(output, document.title)) {
                 is MediaStoreSaver.SaveResult.Saved -> {
@@ -125,7 +132,7 @@ class AudioExportWorker @AssistedInject constructor(
             throw cancelled
         } catch (error: Throwable) {
             workDir.deleteRecursively()
-            return failure(ExportError.UNKNOWN)
+            return failure(ExportError.UNKNOWN, error.message)
         } finally {
             synthesizer.shutdown()
         }
@@ -153,8 +160,24 @@ class AudioExportWorker @AssistedInject constructor(
         }
     }
 
-    private fun failure(error: ExportError): Result =
-        Result.failure(workDataOf(ExportKeys.ERROR to error.name))
+    private var bookTitle: String = ""
+
+    private fun failure(error: ExportError, detail: String? = null): Result {
+        notifier.failedNotification(error, bookTitle, detail)
+        val data = if (detail.isNullOrBlank()) {
+            workDataOf(ExportKeys.ERROR to error.name)
+        } else {
+            workDataOf(
+                ExportKeys.ERROR to error.name,
+                ExportKeys.ERROR_DETAIL to detail.take(MAX_DETAIL_CHARS)
+            )
+        }
+        return Result.failure(data)
+    }
+
+    private companion object {
+        const val MAX_DETAIL_CHARS = 300
+    }
 
     private fun File.readLongOr(default: Long): Long =
         runCatching { readText().trim().toLong() }.getOrDefault(default)

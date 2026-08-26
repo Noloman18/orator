@@ -56,6 +56,13 @@
                 <action android:name="androidx.media3.session.MediaSessionService" />
             </intent-filter>
         </service>
+        <!-- WorkManager's built-in foreground service must declare every type the
+             app starts via setForeground() (enforced since Android 14). Without
+             this merge, audio export fails with ForegroundServiceTypeNotAllowedException. -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync|mediaProcessing"
+            tools:node="merge" />
     </application>
 
 </manifest>

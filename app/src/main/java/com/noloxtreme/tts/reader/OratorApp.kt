@@ -570,7 +570,11 @@ private fun ReaderScreen(
                 is ReaderViewModel.ExportMessage.Failed -> exportSnackbar.showSnackbar(
                     context.getString(
                         R.string.export_failed_reason,
-                        exportErrorMessage(context, message.error)
+                        exportErrorMessage(context, message.error) +
+                            message.detail
+                                ?.takeIf { it.isNotBlank() }
+                                ?.let { " — $it" }
+                                .orEmpty()
                     )
                 )
             }
