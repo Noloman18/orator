@@ -4,7 +4,7 @@ import com.noloxtreme.tts.reader.domain.ExportError
 import com.noloxtreme.tts.reader.domain.ExportState
 
 sealed interface ExportMessage {
-    data class Succeeded(val displayName: String) : ExportMessage
+    data class Succeeded(val displayName: String, val contentUri: String) : ExportMessage
     data class Failed(val error: ExportError, val detail: String? = null) : ExportMessage
 }
 
@@ -27,7 +27,7 @@ internal class ExportMessageGate {
         return when (state) {
             is ExportState.Succeeded ->
                 if (transition is ExportState.Enqueued || transition is ExportState.Running) {
-                    ExportMessage.Succeeded(state.displayName)
+                    ExportMessage.Succeeded(state.displayName, state.contentUri)
                 } else {
                     null
                 }

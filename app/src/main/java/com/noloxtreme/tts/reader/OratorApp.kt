@@ -3,6 +3,7 @@ package com.noloxtreme.tts.reader
 import android.Manifest
 import android.content.ContentResolver
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -63,8 +64,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -128,6 +131,7 @@ import com.noloxtreme.tts.reader.export.R as ExportR
 import com.noloxtreme.tts.reader.playback.NarrationService
 import com.noloxtreme.tts.reader.ui.AppViewModel
 import com.noloxtreme.tts.reader.ui.ExportMessage
+import com.noloxtreme.tts.reader.ui.ExportsScreen
 import com.noloxtreme.tts.reader.ui.LibraryViewModel
 import com.noloxtreme.tts.reader.ui.LibraryLoadState
 import com.noloxtreme.tts.reader.ui.ReaderViewModel
@@ -145,6 +149,7 @@ import kotlin.math.roundToLong
 
 private const val LIBRARY_ROUTE = "library"
 private const val SETTINGS_ROUTE = "settings"
+private const val EXPORTS_ROUTE = "exports"
 private const val READER_ROUTE = "reader/{documentId}"
 private const val SPLASH_DURATION_MILLIS = 5_000L
 private val SUPPORTED_PICKER_MIME_TYPES = arrayOf(
@@ -183,7 +188,8 @@ fun OratorApp(appViewModel: AppViewModel = hiltViewModel()) {
                 composable(LIBRARY_ROUTE) {
                     LibraryScreen(
                         onOpenDocument = { id -> navController.navigate("reader/" + id.value) },
-                        onOpenSettings = { navController.navigate(SETTINGS_ROUTE) }
+                        onOpenSettings = { navController.navigate(SETTINGS_ROUTE) },
+                        onOpenExports = { navController.navigate(EXPORTS_ROUTE) }
                     )
                 }
                 composable(
@@ -193,11 +199,15 @@ fun OratorApp(appViewModel: AppViewModel = hiltViewModel()) {
                     ReaderScreen(
                         documentId = DocumentId(entry.arguments?.getString("documentId").orEmpty()),
                         onBack = { navController.popBackStack() },
-                        onOpenSettings = { navController.navigate(SETTINGS_ROUTE) }
+                        onOpenSettings = { navController.navigate(SETTINGS_ROUTE) },
+                        onOpenExports = { navController.navigate(EXPORTS_ROUTE) }
                     )
                 }
                 composable(SETTINGS_ROUTE) {
                     SettingsScreen(onBack = { navController.popBackStack() })
+                }
+                composable(EXPORTS_ROUTE) {
+                    ExportsScreen(onBack = { navController.popBackStack() })
                 }
             }
         }
@@ -247,6 +257,7 @@ private fun OratorSplashScreen() {
 private fun LibraryScreen(
     onOpenDocument: (DocumentId) -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenExports: () -> Unit,
     viewModel: LibraryViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
@@ -289,7 +300,7 @@ private fun LibraryScreen(
             CenterAlignedTopAppBar(
                 title = { Text(stringResource(R.string.library_title), fontWeight = FontWeight.SemiBold) },
                 actions = {
-                    LibraryMoreMenu(onOpenSettings)
+                    LibraryMoreMenu(onOpenSettings, onOpenExports)
                 }
             )
         },
@@ -500,6 +511,7 @@ private fun ReaderScreen(
     documentId: DocumentId,
     onBack: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenExports: () -> Unit,
     viewModel: ReaderViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
@@ -565,9 +577,22 @@ private fun ReaderScreen(
     LaunchedEffect(Unit) {
         viewModel.exportMessages.collect { message ->
             when (message) {
-                is ExportMessage.Succeeded -> exportSnackbar.showSnackbar(
-                    context.getString(R.string.export_succeeded, message.displayName)
-                )
+                is ExportMessage.Succeeded -> {
+                    val result = exportSnackbar.showSnackbar(
+                        message = context.getString(R.string.export_succeeded, message.displayName),
+                        actionLabel = context.getString(R.string.view),
+                        duration = SnackbarDuration.Long
+                    )
+                    if (result == SnackbarResult.ActionPerformed) {
+                        runCatching {
+                            context.startActivity(
+                                Intent(Intent.ACTION_VIEW)
+                                    .setDataAndType(Uri.parse(message.contentUri), "audio/mp4")
+                                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            )
+                        }
+                    }
+                }
                 is ExportMessage.Failed -> exportSnackbar.showSnackbar(
                     context.getString(
                         R.string.export_failed_reason,
@@ -655,6 +680,7 @@ private fun ReaderScreen(
                             exportState = exportState,
                             onExport = requestExport,
                             onCancelExport = viewModel::cancelExport,
+                            onOpenExports = onOpenExports,
                             onOpenSettings = onOpenSettings
                         )
                     }
@@ -1248,13 +1274,20 @@ private fun NarrationState.positionFor(documentId: DocumentId): DocumentPosition
 }
 
 @Composable
-private fun LibraryMoreMenu(onOpenSettings: () -> Unit) {
+private fun LibraryMoreMenu(onOpenSettings: () -> Unit, onOpenExports: () -> Unit) {
     var menuOpen by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { menuOpen = true }) {
             Icon(Icons.Outlined.MoreVert, contentDescription = stringResource(R.string.more_actions))
         }
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.exports_title)) },
+                onClick = {
+                    menuOpen = false
+                    onOpenExports()
+                }
+            )
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.settings_title)) },
                 onClick = {
@@ -1271,6 +1304,7 @@ private fun ExportAndSettingsMenu(
     exportState: ExportState,
     onExport: () -> Unit,
     onCancelExport: () -> Unit,
+    onOpenExports: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
     var menuOpen by remember { mutableStateOf(false) }
@@ -1304,6 +1338,13 @@ private fun ExportAndSettingsMenu(
                     }
                 )
             }
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.exports_title)) },
+                onClick = {
+                    menuOpen = false
+                    onOpenExports()
+                }
+            )
             HorizontalDivider()
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.settings_title)) },

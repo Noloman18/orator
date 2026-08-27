@@ -29,7 +29,7 @@ class ExportMessageGateTest {
         assertNull(gate.onState(ExportState.Enqueued))
         assertNull(gate.onState(ExportState.Running(40)))
         val message = gate.onState(ExportState.Succeeded("Book.m4a", "content://book"))
-        assertEquals(ExportMessage.Succeeded("Book.m4a"), message)
+        assertEquals(ExportMessage.Succeeded("Book.m4a", "content://book"), message)
         // The state is not re-emitted afterwards.
         assertNull(gate.onState(ExportState.Succeeded("Book.m4a", "content://book")))
     }
@@ -46,12 +46,12 @@ class ExportMessageGateTest {
         assertNull(gate.onState(ExportState.Enqueued))
         assertNull(gate.onState(ExportState.Running(90)))
         assertEquals(
-            ExportMessage.Succeeded("Book.m4a"),
+            ExportMessage.Succeeded("Book.m4a", "content://book"),
             gate.onState(ExportState.Succeeded("Book.m4a", "content://book"))
         )
         assertNull(gate.onState(ExportState.Enqueued))
         assertEquals(
-            ExportMessage.Succeeded("Book.m4a"),
+            ExportMessage.Succeeded("Book.m4a", "content://book"),
             gate.onState(ExportState.Succeeded("Book.m4a", "content://book"))
         )
     }
