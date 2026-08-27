@@ -1027,115 +1027,134 @@ private fun SettingsScreen(
             )
         }
     ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(22.dp, 18.dp, 22.dp, 36.dp),
-            verticalArrangement = Arrangement.spacedBy(22.dp)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
         ) {
-            item {
-                SettingSectionTitle(stringResource(R.string.appearance))
-                Text(stringResource(R.string.theme), style = MaterialTheme.typography.titleMedium)
-                ChoiceRow(
-                    options = ThemePreference.entries,
-                    selected = settings.theme,
-                    label = { themeLabel(it) },
-                    onSelected = viewModel::setTheme
-                )
-                Spacer(Modifier.height(14.dp))
-                Text(stringResource(R.string.line_spacing), style = MaterialTheme.typography.titleMedium)
-                ChoiceRow(
-                    options = LineHeightPreference.entries,
-                    selected = settings.lineHeight,
-                    label = { lineHeightLabel(it) },
-                    onSelected = viewModel::setLineHeight
-                )
-            }
-            item {
-                SettingSectionTitle(stringResource(R.string.reading))
-                Text(stringResource(R.string.text_size, settings.readerFontSizeSp), style = MaterialTheme.typography.titleMedium)
-                Slider(
-                    value = settings.readerFontSizeSp.toFloat(),
-                    onValueChange = { viewModel.setFontSize(it.toInt()) },
-                    valueRange = 14f..32f,
-                    steps = 17
-                )
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.weight(1f)) {
-                        Text(stringResource(R.string.follow_spoken_text), style = MaterialTheme.typography.titleMedium)
-                        Text(stringResource(R.string.follow_spoken_text_description), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Switch(checked = settings.followSpokenText, onCheckedChange = viewModel::setFollowSpokenText)
-                }
-            }
-            item {
-                SettingSectionTitle(stringResource(R.string.voice))
-                val voices = viewModel.voices.collectAsState().value
-                if (voices.isEmpty()) {
-                    Text(
-                        stringResource(R.string.no_offline_voices),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 22.dp, top = 18.dp, end = 22.dp, bottom = 96.dp),
+                verticalArrangement = Arrangement.spacedBy(22.dp)
+            ) {
+                item {
+                    SettingSectionTitle(stringResource(R.string.appearance))
+                    Text(stringResource(R.string.theme), style = MaterialTheme.typography.titleMedium)
+                    ChoiceRow(
+                        options = ThemePreference.entries,
+                        selected = settings.theme,
+                        label = { themeLabel(it) },
+                        onSelected = viewModel::setTheme
                     )
+                    Spacer(Modifier.height(14.dp))
+                    Text(stringResource(R.string.line_spacing), style = MaterialTheme.typography.titleMedium)
+                    ChoiceRow(
+                        options = LineHeightPreference.entries,
+                        selected = settings.lineHeight,
+                        label = { lineHeightLabel(it) },
+                        onSelected = viewModel::setLineHeight
+                    )
+                }
+                item {
+                    SettingSectionTitle(stringResource(R.string.reading))
+                    Text(stringResource(R.string.text_size, settings.readerFontSizeSp), style = MaterialTheme.typography.titleMedium)
+                    Slider(
+                        value = settings.readerFontSizeSp.toFloat(),
+                        onValueChange = { viewModel.setFontSize(it.toInt()) },
+                        valueRange = 14f..32f,
+                        steps = 17
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.weight(1f)) {
+                            Text(stringResource(R.string.follow_spoken_text), style = MaterialTheme.typography.titleMedium)
+                            Text(stringResource(R.string.follow_spoken_text_description), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(checked = settings.followSpokenText, onCheckedChange = viewModel::setFollowSpokenText)
+                    }
+                }
+                item {
+                    SettingSectionTitle(stringResource(R.string.voice))
+                    Text(stringResource(R.string.offline_voice_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(8.dp))
-                    OutlinedButton(onClick = {
-                        context.startActivity(android.content.Intent("android.settings.TTS_SETTINGS"))
-                    }) {
-                        Text(stringResource(R.string.install_voice_data))
-                    }
-                } else {
-                    val grouped = voices.groupBy { voice ->
-                        java.util.Locale.forLanguageTag(voice.localeLanguageTag)
-                            .displayLanguage.ifBlank { voice.localeLanguageTag }
-                    }
-                    grouped.forEach { (language, groupVoices) ->
+                    val voices = viewModel.voices.collectAsState().value
+                    if (voices.isEmpty()) {
                         Text(
-                            language,
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(top = 6.dp, bottom = 4.dp)
+                            stringResource(R.string.no_offline_voices),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        groupVoices.forEach { voice ->
-                            val selected = settings.voiceName == voice.name
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(MaterialTheme.shapes.medium)
-                                    .clickable {
-                                        viewModel.setVoice(if (selected) null else voice.name)
-                                    }
-                                    .padding(vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    voice.name,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    modifier = Modifier.weight(1f),
-                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
-                                )
-                                if (selected) {
-                                    Icon(
-                                        Icons.Outlined.Check,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedButton(onClick = {
+                            context.startActivity(android.content.Intent("android.settings.TTS_SETTINGS"))
+                        }) {
+                            Text(stringResource(R.string.install_voice_data))
+                        }
+                    } else {
+                        val grouped = voices.groupBy { voice ->
+                            java.util.Locale.forLanguageTag(voice.localeLanguageTag)
+                                .displayLanguage.ifBlank { voice.localeLanguageTag }
+                        }
+                        grouped.forEach { (language, groupVoices) ->
+                            Text(
+                                language,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(top = 6.dp, bottom = 4.dp)
+                            )
+                            groupVoices.forEach { voice ->
+                                val selected = settings.voiceName == voice.name
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(MaterialTheme.shapes.medium)
+                                        .clickable {
+                                            viewModel.setVoice(if (selected) null else voice.name)
+                                        }
+                                        .padding(vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        voice.name,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        modifier = Modifier.weight(1f),
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
                                     )
+                                    if (selected) {
+                                        Icon(
+                                            Icons.Outlined.Check,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
+                    Spacer(Modifier.height(8.dp))
+                    Text(stringResource(R.string.speech_rate, settings.speechRate.toString().take(4)), style = MaterialTheme.typography.titleMedium)
+                    Slider(value = settings.speechRate, onValueChange = viewModel::setRate, valueRange = 0.5f..2f)
+                    Text(stringResource(R.string.pitch, settings.speechPitch.toString().take(4)), style = MaterialTheme.typography.titleMedium)
+                    Slider(value = settings.speechPitch, onValueChange = viewModel::setPitch, valueRange = 0.5f..1.5f)
                 }
-                Spacer(Modifier.height(8.dp))
-                Text(stringResource(R.string.speech_rate, settings.speechRate.toString().take(4)), style = MaterialTheme.typography.titleMedium)
-                Slider(value = settings.speechRate, onValueChange = viewModel::setRate, valueRange = 0.5f..2f)
-                Text(stringResource(R.string.pitch, settings.speechPitch.toString().take(4)), style = MaterialTheme.typography.titleMedium)
-                Slider(value = settings.speechPitch, onValueChange = viewModel::setPitch, valueRange = 0.5f..1.5f)
-                Spacer(Modifier.height(6.dp))
-                OutlinedButton(onClick = viewModel::previewVoice) {
+            }
+
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth(),
+                tonalElevation = 3.dp,
+                shadowElevation = 8.dp
+            ) {
+                OutlinedButton(
+                    onClick = viewModel::previewVoice,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 22.dp, vertical = 12.dp)
+                ) {
                     Icon(Icons.Outlined.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                     Text(stringResource(R.string.preview_voice))
                 }
-                Spacer(Modifier.height(8.dp))
-                Text(stringResource(R.string.offline_voice_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
