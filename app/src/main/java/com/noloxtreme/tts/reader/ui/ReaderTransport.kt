@@ -15,25 +15,25 @@ interface ReaderTransport {
     fun fastForward()
 }
 
-/** Audio mode: the transport buttons skip through the narrated sentences. */
+/** Audio mode: skip buttons navigate sentences and fast-forward increases speech speed. */
 class NarrationTransport(
     private val rewindAction: () -> Unit,
     private val previousSentenceAction: () -> Unit,
     private val nextSentenceAction: () -> Unit,
-    private val fastForwardAction: () -> Unit
+    private val increaseSpeedAction: () -> Unit
 ) : ReaderTransport {
     override fun rewind() = rewindAction()
     override fun previous() = previousSentenceAction()
     override fun next() = nextSentenceAction()
-    override fun fastForward() = fastForwardAction()
+    override fun fastForward() = increaseSpeedAction()
 }
 
 /**
  * Reading mode: the skip buttons move between chapters (spine items) while
  * the fast buttons turn pages inside the current chapter, mirroring the
  * swipe gesture. This keeps the fast buttons distinct from the skip buttons
- * and matches the narration mode, where skip moves one sentence and fast
- * jumps several.
+ * and keeps the visual reader's page-turn behavior separate from narration
+ * mode, where fast-forward changes speech speed.
  */
 class ChapterTransport(
     private val previousChapter: () -> Unit,

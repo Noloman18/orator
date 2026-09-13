@@ -473,6 +473,26 @@ class NarrationCoordinatorTest {
     }
 
     @Test
+    fun increaseSpeechRatePersistsTheNextPresetAndRestartsAtTheActiveRange() = runTest {
+        val h = harness()
+        h.coordinator.dispatch(NarrationCommand.Load(documentId))
+        advanceUntilIdle()
+        h.coordinator.dispatch(NarrationCommand.Play)
+        advanceUntilIdle()
+        val first = h.engine.spokenSegments.single()
+        h.engine.emit(SpeechEvent.RangeStarted(first.utteranceId, 6, 12))
+        advanceUntilIdle()
+
+        h.coordinator.dispatch(NarrationCommand.IncreaseSpeechRate)
+        advanceUntilIdle()
+
+        assertEquals(1.25f, h.settings.state.value.speechRate)
+        assertEquals(2, h.engine.spokenSegments.size)
+        assertEquals(6, h.engine.spokenSegments.last().startInParagraph)
+        assertEquals(1.25f, h.engine.initializeCalls.last().rate)
+    }
+
+    @Test
     fun restartCompletedResetsProgressToZeroBeforeSpeaking() = runTest {
         val h = harness(completed = true)
         h.progress.saved.clear()

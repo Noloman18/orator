@@ -1,0 +1,7 @@
+Version 1.5.1 (build 8)
+
+What's new in this release:
+
+- Fixed audio exports failing on some older Samsung devices
+- Export progress now clearly shows speech creation, audio encoding, and saving before the file is ready
+- Fast-forward now increases narration speed from 1× up to 2×; Next still skips to the next sentence

@@ -52,7 +52,7 @@
     <string name="previous_sentence">Previous sentence</string>
     <string name="next_sentence">Next sentence</string>
     <string name="rewind">Rewind five sentences</string>
-    <string name="fast_forward">Fast-forward five sentences</string>
+    <string name="increase_speech_speed">Increase speech speed</string>
     <string name="remove_book_action">Remove book</string>
     <string name="imported_book">Imported book</string>
     <string name="theme_light">Light</string>

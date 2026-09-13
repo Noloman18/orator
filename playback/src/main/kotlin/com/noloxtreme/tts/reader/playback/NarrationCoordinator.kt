@@ -16,6 +16,7 @@ import com.noloxtreme.tts.reader.domain.ReadingProgress
 import com.noloxtreme.tts.reader.domain.SettingsRepository
 import com.noloxtreme.tts.reader.domain.SpokenRange
 import com.noloxtreme.tts.reader.domain.TimeProvider
+import com.noloxtreme.tts.reader.domain.nextSpeechRate
 import java.text.BreakIterator
 import java.util.Locale
 import java.util.UUID
@@ -108,6 +109,7 @@ class NarrationCoordinator @Inject constructor(
             is NarrationCommand.Pause -> pause(resumeOnFocusGain = false)
             NarrationCommand.PreviousSentence -> moveSentence(previous = true)
             NarrationCommand.NextSentence -> moveSentence(previous = false)
+            NarrationCommand.IncreaseSpeechRate -> increaseSpeechRate()
             is NarrationCommand.JumpSentences -> moveSentence(
                 previous = command.previous,
                 count = command.count
@@ -323,6 +325,12 @@ class NarrationCoordinator @Inject constructor(
         savePosition(first.positionAt(0), false, force = true)
         mutableState.value = NarrationState.Paused(currentDocument.id, first.positionAt(0), null)
         play()
+    }
+
+    private suspend fun increaseSpeechRate() {
+        settingsRepository.updateSettings { settings ->
+            settings.copy(speechRate = nextSpeechRate(settings.speechRate))
+        }
     }
 
     private suspend fun handleSettingsChange(settings: OratorSettings) {

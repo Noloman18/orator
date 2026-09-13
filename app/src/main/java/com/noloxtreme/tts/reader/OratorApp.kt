@@ -992,7 +992,7 @@ private fun ReaderControls(
                 Icon(
                     Icons.Outlined.FastForward,
                     contentDescription = stringResource(
-                        if (reading) R.string.next_page else R.string.fast_forward
+                        if (reading) R.string.next_page else R.string.increase_speech_speed
                     )
                 )
             }

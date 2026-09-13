@@ -94,6 +94,13 @@ data class ReaderPosition(
 
 const val FAST_JUMP_SENTENCE_COUNT = 5
 
+/** Rates offered by the playback speed button, in the order it cycles through them. */
+val SPEECH_RATE_CYCLE = listOf(1.0f, 1.25f, 1.5f, 1.75f, 2.0f)
+
+/** Returns the next faster preset, looping from 2× back to normal speed. */
+fun nextSpeechRate(currentRate: Float): Float =
+    SPEECH_RATE_CYCLE.firstOrNull { it > currentRate } ?: SPEECH_RATE_CYCLE.first()
+
 enum class ThemePreference {
     SYSTEM,
     LIGHT,
@@ -187,6 +194,8 @@ sealed interface NarrationCommand {
     data class Pause(val userInitiated: Boolean = true) : NarrationCommand
     data object PreviousSentence : NarrationCommand
     data object NextSentence : NarrationCommand
+    /** Increases speech speed through [SPEECH_RATE_CYCLE] and persists the selected rate. */
+    data object IncreaseSpeechRate : NarrationCommand
     data class JumpSentences(
         val previous: Boolean,
         val count: Int

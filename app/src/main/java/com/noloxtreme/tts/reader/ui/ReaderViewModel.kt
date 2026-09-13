@@ -33,6 +33,7 @@ import com.noloxtreme.tts.reader.domain.usecase.LoadImageResource
 import com.noloxtreme.tts.reader.domain.usecase.LoadSpineContent
 import com.noloxtreme.tts.reader.domain.usecase.LoadSpineCount
 import com.noloxtreme.tts.reader.domain.usecase.LoadTableOfContents
+import com.noloxtreme.tts.reader.domain.usecase.IncreaseSpeechRate
 import com.noloxtreme.tts.reader.domain.usecase.ObserveReaderPosition
 import com.noloxtreme.tts.reader.domain.usecase.ReaderContent
 import com.noloxtreme.tts.reader.domain.usecase.ObserveReaderContent
@@ -95,6 +96,7 @@ class ReaderViewModel @Inject constructor(
     private val pauseNarration: PauseNarration,
     private val seekNarration: SeekNarration,
     private val skipSentence: SkipSentence,
+    private val increaseSpeechRateUseCase: IncreaseSpeechRate,
     private val restartCompletedDocument: RestartCompletedDocument,
     private val contentRepository: ContentRepository,
     private val loadTableOfContents: LoadTableOfContents,
@@ -131,7 +133,7 @@ class ReaderViewModel @Inject constructor(
         rewindAction = ::rewind,
         previousSentenceAction = ::previousSentence,
         nextSentenceAction = ::nextSentence,
-        fastForwardAction = ::fastForward
+        increaseSpeedAction = ::increaseSpeechRate
     )
     private val chapterTransport = ChapterTransport(
         previousChapter = ::previousSpineItem,
@@ -302,10 +304,7 @@ class ReaderViewModel @Inject constructor(
         count = FAST_JUMP_SENTENCE_COUNT
     )
 
-    fun fastForward() = skipSentence.execute(
-        previous = false,
-        count = FAST_JUMP_SENTENCE_COUNT
-    )
+    fun increaseSpeechRate() = increaseSpeechRateUseCase.execute()
 
     fun restart() = restartCompletedDocument.execute()
 

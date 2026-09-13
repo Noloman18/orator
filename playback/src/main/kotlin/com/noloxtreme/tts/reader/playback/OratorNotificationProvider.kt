@@ -60,13 +60,8 @@ class OratorNotificationProvider(
             )
             true
         }
-        CUSTOM_FAST_FORWARD_ACTION -> {
-            narrationController.dispatch(
-                NarrationCommand.JumpSentences(
-                    previous = false,
-                    count = FAST_JUMP_SENTENCE_COUNT
-                )
-            )
+        CUSTOM_INCREASE_SPEED_ACTION -> {
+            narrationController.dispatch(NarrationCommand.IncreaseSpeechRate)
             true
         }
         else -> false
@@ -133,8 +128,8 @@ class OratorNotificationProvider(
                 actionFactory.createCustomAction(
                     session,
                     IconCompat.createWithResource(context, FAST_FORWARD_ICON),
-                    context.getString(R.string.notification_fast_forward),
-                    CUSTOM_FAST_FORWARD_ACTION,
+                    context.getString(R.string.notification_increase_speed),
+                    CUSTOM_INCREASE_SPEED_ACTION,
                     Bundle.EMPTY
                 )
             )
@@ -172,6 +167,6 @@ class OratorNotificationProvider(
         const val FAST_FORWARD_ICON = android.R.drawable.ic_media_ff
         const val NEXT_ICON = android.R.drawable.ic_media_next
         const val CUSTOM_REWIND_ACTION = "com.noloxtreme.tts.reader.action.REWIND"
-        const val CUSTOM_FAST_FORWARD_ACTION = "com.noloxtreme.tts.reader.action.FAST_FORWARD"
+        const val CUSTOM_INCREASE_SPEED_ACTION = "com.noloxtreme.tts.reader.action.INCREASE_SPEED"
     }
 }

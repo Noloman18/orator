@@ -6,13 +6,13 @@ import org.junit.Test
 class ReaderTransportTest {
 
     @Test
-    fun narrationTransportForwardsToSentenceActions() {
+    fun narrationTransportForwardsToSentenceAndSpeedActions() {
         val calls = mutableListOf<String>()
         val transport = NarrationTransport(
             rewindAction = { calls += "rewind" },
             previousSentenceAction = { calls += "previous" },
             nextSentenceAction = { calls += "next" },
-            fastForwardAction = { calls += "fastForward" }
+            increaseSpeedAction = { calls += "increaseSpeed" }
         )
 
         transport.rewind()
@@ -20,7 +20,7 @@ class ReaderTransportTest {
         transport.next()
         transport.fastForward()
 
-        assertEquals(listOf("rewind", "previous", "next", "fastForward"), calls)
+        assertEquals(listOf("rewind", "previous", "next", "increaseSpeed"), calls)
     }
 
     @Test

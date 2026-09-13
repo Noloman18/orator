@@ -1,6 +1,7 @@
 package com.noloxtreme.tts.reader.domain
 
 import com.noloxtreme.tts.reader.domain.usecase.DeleteDocument
+import com.noloxtreme.tts.reader.domain.usecase.IncreaseSpeechRate
 import com.noloxtreme.tts.reader.domain.usecase.ImportDocument
 import com.noloxtreme.tts.reader.domain.usecase.ObserveLibrary
 import com.noloxtreme.tts.reader.domain.usecase.ObserveReaderContent
@@ -55,6 +56,7 @@ class UseCaseDelegationTest {
         SkipSentence(controller).execute(previous = true)
         SkipSentence(controller).execute(previous = false)
         SkipSentence(controller).execute(previous = false, count = 5)
+        IncreaseSpeechRate(controller).execute()
 
         assertEquals(
             listOf(
@@ -64,7 +66,8 @@ class UseCaseDelegationTest {
                 NarrationCommand.SeekTo(position),
                 NarrationCommand.PreviousSentence,
                 NarrationCommand.NextSentence,
-                NarrationCommand.JumpSentences(previous = false, count = 5)
+                NarrationCommand.JumpSentences(previous = false, count = 5),
+                NarrationCommand.IncreaseSpeechRate
             ),
             controller.commands
         )
