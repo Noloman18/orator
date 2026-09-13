@@ -45,11 +45,26 @@ class ExportNotifier @Inject constructor(
         }
     }
 
-    fun foregroundInfo(percent: Int, bookTitle: String, documentId: String): ForegroundInfo {
+    internal fun foregroundInfo(
+        percent: Int,
+        bookTitle: String,
+        documentId: String,
+        stage: ExportStage
+    ): ForegroundInfo {
         val notification = baseBuilder(PROGRESS_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentTitle(context.getString(R.string.export_notification_title, bookTitle))
-            .setContentText(context.getString(R.string.export_notification_percent, percent))
+            .setContentText(
+                context.getString(
+                    when (stage) {
+                        ExportStage.SYNTHESIZING -> R.string.export_notification_synthesizing
+                        ExportStage.ENCODING -> R.string.export_notification_encoding
+                        ExportStage.SAVING -> R.string.export_notification_saving
+                    },
+                    percent
+                )
+            )
+            .setProgress(MAX_PROGRESS, percent, false)
             .setContentIntent(launchAppIntent())
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -150,6 +165,7 @@ class ExportNotifier @Inject constructor(
         }
 
     private companion object {
+        const val MAX_PROGRESS = 100
         const val PROGRESS_CHANNEL_ID = "audio_export_progress"
         const val COMPLETION_CHANNEL_ID = "audio_export_completion"
         const val PROGRESS_NOTIFICATION_ID = 1001
@@ -158,4 +174,11 @@ class ExportNotifier @Inject constructor(
         const val CANCEL_REQUEST_CODE = 1002
         const val COMPLETION_REQUEST_CODE = 1003
     }
+}
+
+/** The current visible step of a two-stage audio export. */
+internal enum class ExportStage {
+    SYNTHESIZING,
+    ENCODING,
+    SAVING
 }

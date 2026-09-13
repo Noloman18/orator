@@ -3,7 +3,9 @@
     <string name="export_channel_progress">Audio export progress</string>
     <string name="export_channel_completion">Audio export finished</string>
     <string name="export_notification_title">Exporting %1$s</string>
-    <string name="export_notification_percent">%1$d%%</string>
+    <string name="export_notification_synthesizing">Creating speech — %1$d%%</string>
+    <string name="export_notification_encoding">Encoding audio — %1$d%%</string>
+    <string name="export_notification_saving">Saving audio — %1$d%%</string>
     <string name="export_cancel_action">Cancel</string>
     <string name="export_done_title">Export complete</string>
     <string name="export_done_text">%1$s is ready — saved to Music/Orator</string>

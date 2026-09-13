@@ -13,7 +13,7 @@ Add a user-initiated **Export audio…** action that synthesizes a full document
 
 - The job is a WorkManager `CoroutineWorker` elevated to a foreground service (`mediaProcessing` type on Android 15+, `dataSync` below) so the OS does not reap it. Jobs are deduplicated per document and cancellable from the notification or the reader menu.
 - The worker reads paragraph text from Room (never through WorkManager input data, which is capped at 10 KB), chunks it with the narration sentence-boundary rules (max 3000 characters), and synthesizes each chunk via `synthesizeToFile` on a dedicated `TextToSpeech` instance — so an export can run while live narration plays on its own engine.
-- WAV chunks are concatenated and encoded to AAC-LC (mono, 22050 Hz, 64 kbps) with Media3 Transformer, a maintained AndroidX component. No FFmpeg or other native code.
+- WAV chunks are concatenated and encoded to AAC in an M4A container with Media3 Transformer, a maintained AndroidX component. Media3 negotiates a supported AAC encoder configuration for the device rather than forcing a profile or bitrate that a vendor codec may reject. No FFmpeg or other native code.
 - The finished file is published to Music/Orator via MediaStore (API 29+; legacy shared Music directory on API 24–28). A previous export of the same book is replaced, not duplicated.
 - Progress and completion surface through the foreground notification (with a cancel action) and, while the app is open, the same top-bar progress pattern used for imports.
 - Per-segment state on disk gives cheap resume after process death or reboot; user cancellation deletes partial work.

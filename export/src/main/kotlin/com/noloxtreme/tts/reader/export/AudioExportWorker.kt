@@ -95,7 +95,7 @@ class AudioExportWorker @AssistedInject constructor(
             pitch = settings.speechPitch
         )
 
-        setForeground(notifier.foregroundInfo(0, document.title, documentId.value))
+        updateProgress(0, document.title, documentId.value, ExportStage.SYNTHESIZING)
         when (synthesizer.initialize(configuration)) {
             SpeechInitialization.Ready -> Unit
             SpeechInitialization.EngineUnavailable -> return failure(ExportError.TTS_UNAVAILABLE)
@@ -125,20 +125,47 @@ class AudioExportWorker @AssistedInject constructor(
                 }
                 next = (index + 1).toLong()
                 stateFile.writeLong(next)
-                val percent = (next * 100 / chunks.size).toInt().coerceIn(0, 100)
-                setProgress(workDataOf(ExportKeys.PERCENT to percent))
-                setForeground(notifier.foregroundInfo(percent, document.title, documentId.value))
+                val percent = (next * SYNTHESIS_PROGRESS_WEIGHT / chunks.size)
+                    .toInt()
+                    .coerceIn(0, SYNTHESIS_PROGRESS_WEIGHT)
+                updateProgress(percent, document.title, documentId.value, ExportStage.SYNTHESIZING)
             }
 
             val wavFiles = (0 until chunks.size).map { index ->
                 File(segmentsDir, "%06d.wav".format(index))
             }
             val output = File(workDir, "export.m4a")
-            val assembleResult = assembler.assemble(wavFiles, output)
+            // A previous encoding attempt may have left a partial container. It
+            // cannot be resumed safely, while the synthesized WAV segments can.
+            output.delete()
+            updateProgress(
+                SYNTHESIS_PROGRESS_WEIGHT,
+                document.title,
+                documentId.value,
+                ExportStage.ENCODING
+            )
+            val assembleResult = assembler.assemble(wavFiles, output) { encodingPercent ->
+                val overallPercent = SYNTHESIS_PROGRESS_WEIGHT +
+                    (encodingPercent * ENCODING_PROGRESS_WEIGHT / 100)
+                updateProgress(
+                    overallPercent.coerceAtMost(MAX_IN_PROGRESS_PERCENT),
+                    document.title,
+                    documentId.value,
+                    ExportStage.ENCODING
+                )
+            }
             if (assembleResult.isFailure) {
+                output.delete()
                 val exception = assembleResult.exceptionOrNull()
                 return failure(ExportError.ENCODING_FAILED, exception?.let { describe(it) })
             }
+            checkNotStopped(workDir)
+            updateProgress(
+                MAX_IN_PROGRESS_PERCENT,
+                document.title,
+                documentId.value,
+                ExportStage.SAVING
+            )
             when (val saved = saver.publish(output, document.title)) {
                 is MediaStoreSaver.SaveResult.Saved -> {
                     notifier.completedNotification(saved.uri, saved.displayName)
@@ -184,6 +211,22 @@ class AudioExportWorker @AssistedInject constructor(
         }
     }
 
+    /**
+     * Leaves room below 100% for AAC packaging and MediaStore publication.
+     * The progress notification therefore reaches 100% only when its separate
+     * completion notification is shown, never while more work remains.
+     */
+    private suspend fun updateProgress(
+        percent: Int,
+        title: String,
+        documentId: String,
+        stage: ExportStage
+    ) {
+        val safePercent = percent.coerceIn(0, MAX_IN_PROGRESS_PERCENT)
+        setProgress(workDataOf(ExportKeys.PERCENT to safePercent))
+        setForeground(notifier.foregroundInfo(safePercent, title, documentId, stage))
+    }
+
     private fun failure(error: ExportError, detail: String? = null): Result {
         notifier.failedNotification(error, bookTitle, detail)
         val data = if (detail.isNullOrBlank()) {
@@ -213,5 +256,8 @@ class AudioExportWorker @AssistedInject constructor(
     private companion object {
         const val TAG = "OratorExport"
         const val MAX_DETAIL_CHARS = 300
+        const val SYNTHESIS_PROGRESS_WEIGHT = 85
+        const val ENCODING_PROGRESS_WEIGHT = 14
+        const val MAX_IN_PROGRESS_PERCENT = 99
     }
 }
