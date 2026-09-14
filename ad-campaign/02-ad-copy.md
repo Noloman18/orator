@@ -1,81 +1,80 @@
 # Ad copy — Google App campaigns
 
-All headlines are verified at ≤ 30 characters and all descriptions at ≤ 90
-characters. Upload five headlines and five descriptions at launch; replace the
-two lowest-performing of each after two weeks with the alternates.
+Headlines must be 30 characters or fewer; descriptions must be 90 characters or
+fewer. Upload five of each at launch. Because Google can combine text assets in
+different ways, every line must make sense on its own.
 
 ## Headlines
 
-### Angle 1 — no intrusive ads (primary)
+### Angle 1 — uninterrupted book (primary)
 
 | Headline | Chars |
 | --- | --- |
-| No ads. Ever. | 12 |
-| No intrusive ads | 17 |
-| Ads never interrupt | 20 |
-| Zero intrusive ads | 19 |
-| No ad breaks. Ever. | 19 |
+| Reading without ad breaks | 25 |
+| Your reading, uninterrupted | 27 |
+| No pop-ups in your book | 23 |
+| Ad-free reading and listening | 29 |
+| Listen without interruptions | 28 |
 
 ### Angle 2 — clean reading experience
 
 | Headline | Chars |
 | --- | --- |
 | Read without interruptions | 26 |
-| No ads in your reading | 22 |
+| A calm place for your books | 27 |
 | Your reading, undisturbed | 25 |
-| Peaceful, ad-free reading | 25 |
-| Ads never ruin reading | 22 |
+| Peaceful reading and listening | 30 |
+| Your book stays in focus | 24 |
 
 ### Angle 3 — product (alternates)
 
 | Headline | Chars |
 | --- | --- |
 | Turn text into speech | 21 |
-| Read aloud, ad-free | 20 |
-| Your books, read aloud | 23 |
-| Listen to any document | 23 |
-| Documents read aloud | 22 |
-| Offline text-to-speech | 23 |
-| Works without Wi-Fi | 21 |
-| No internet? No problem | 22 |
+| Your books, read aloud | 22 |
+| Listen to any document | 22 |
+| Export books to audio | 21 |
+| Offline text-to-speech | 22 |
+| No account needed | 17 |
+| Core reader works offline | 25 |
 | Read with your ears | 19 |
 
 ## Descriptions
 
 | Description | Chars |
 | --- | --- |
-| Free of intrusive ads. Import PDFs and EPUBs, listen offline with your phone's voice. | 85 |
-| No ads, no accounts, no tracking. Your documents stay on your device, always. | 77 |
-| A calm, offline-first reader that reads your documents aloud. No intrusive ads. | 78 |
-| Open any document and listen. Uses voices already on your device, nothing pops up. | 71 |
-| Peaceful reading: no ads, no interruptions, no tracking. | 52 |
-| Read and listen on the bus, in bed, anywhere. No Wi-Fi needed, no intrusive ads. | 79 |
-| Your books read to you with word highlighting. No intrusive ads, ever. | 68 |
+| Read and listen without ad breaks or pop-ups. Import EPUB, PDF, Markdown, and TXT. | 82 |
+| Turn documents into speech with voices already installed on your Android phone. | 79 |
+| No account needed. Your books, progress, and notes stay on your device. | 71 |
+| A calm reader with narration, speed controls, book notes, and audio export. | 75 |
+| Core reading and narration work offline with an installed Android voice. | 72 |
+| Import text, EPUB, Markdown, and text-based PDF, then pick up where you stopped. | 80 |
+| A small footer ad may appear in Book Notes, never while you read or listen. | 75 |
 
 ## Suggested launch set
 
-Five headlines (one per angle where possible):
+Five headlines:
 
-1. No ads. Ever.
-2. No intrusive ads
+1. Reading without ad breaks
+2. Your reading, uninterrupted
 3. Read without interruptions
 4. Your books, read aloud
 5. Turn text into speech
 
 Five descriptions:
 
-1. Free of intrusive ads. Import PDFs and EPUBs, listen offline with your phone's voice.
-2. No ads, no accounts, no tracking. Your documents stay on your device, always.
-3. A calm, offline-first reader that reads your documents aloud. No intrusive ads.
-4. Open any document and listen. Uses voices already on your device, nothing pops up.
-5. Peaceful reading: no ads, no interruptions, no tracking.
+1. Read and listen without ad breaks or pop-ups. Import EPUB, PDF, Markdown, and TXT.
+2. Turn documents into speech with voices already installed on your Android phone.
+3. No account needed. Your books, progress, and notes stay on your device.
+4. A calm reader with narration, speed controls, book notes, and audio export.
+5. Core reading and narration work offline with an installed Android voice.
 
 ## Copy rules
 
 - Never claim features the app does not have (no OCR, no cloud voices, no
-  audiobook export — see the Play listing description).
-- Keep the "no intrusive ads" claim in at least three of the five live
-  headlines; it is the differentiator.
-- Do not promise "free forever" pricing; the promise is that ads never intrude
-  on the reading experience.
-- Do not use urgency or scare tactics; the brand tone is calm and trustworthy.
+  audiobook import—see the Play listing description).
+- Never say “no ads,” “no ads ever,” “no tracking,” or “no internet.” The Book
+  Notes screen can display a footer ad.
+- “Ad-free reading and listening” is permitted because ads never interrupt the
+  reader or narration. Keep that qualification intact.
+- Do not promise “free forever” pricing. Keep the tone calm and trustworthy.

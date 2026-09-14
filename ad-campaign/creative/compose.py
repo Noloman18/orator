@@ -87,24 +87,25 @@ def main():
     bg4 = Image.open(os.path.join(BASE, "04-book-sound.png")).convert("RGBA")
     bg5 = Image.open(os.path.join(BASE, "05-night-reading.png")).convert("RGBA")
 
-    # 1. Hero landscape 1200x628 — no-ads promise + phone mockup
+    # 1. Hero landscape 1200x628 — uninterrupted-book promise + phone mockup
     img = cover(bg1, 1200, 628).copy()
     d = ImageDraw.Draw(img)
     shadow_rect(d, (0, 0, 560, 628))
-    text(d, (70, 180), "No ads. Ever.", font(66), anchor="la")
-    text(d, (72, 268), "Your reading, undisturbed", font(30), anchor="la",
+    text(d, (70, 165), "Reading without", font(48), anchor="la")
+    text(d, (70, 225), "ad breaks", font(58), anchor="la")
+    text(d, (72, 302), "Your reading stays uninterrupted", font(27), anchor="la",
          fill=(255, 255, 255, 225))
     phone(d, shot, 880, 84, 216)
     wordmark(d, (70, 528), icon, 30)
     img.convert("RGB").save(os.path.join(ROOT, "01-hero-landscape-1200x628.png"))
 
-    # 2. Square 1200x1200 — icon block, no-intrusive-ads claim
+    # 2. Square 1200x1200 — icon block, uninterrupted-book claim
     img = cover(bg2, 1200, 1200).copy()
     d = ImageDraw.Draw(img)
     ic = rounded_icon(icon, 300)
     d._image.alpha_composite(ic, (450, 150))
-    text(d, (600, 640), "No intrusive ads", font(56), anchor="ma")
-    text(d, (600, 740), "No ad breaks. No pop-ups.", font(30), anchor="ma",
+    text(d, (600, 640), "No ad breaks", font(56), anchor="ma")
+    text(d, (600, 740), "No pop-ups in your book.", font(30), anchor="ma",
          fill=(255, 255, 255, 225))
     wordmark(d, (600, 1010), icon, 34)
     # center the wordmark (icon+text are asymmetric) by measuring text width
@@ -139,7 +140,7 @@ def main():
     d = ImageDraw.Draw(img)
     shadow_rect(d, (0, 0, 640, 628))
     text(d, (70, 180), "Peaceful reading", font(60), anchor="la")
-    text(d, (72, 268), "No ads. No interruptions. No tracking.", font(30),
+    text(d, (72, 268), "No ad breaks. No pop-ups.", font(30),
          anchor="la", fill=(255, 255, 255, 225))
     wordmark(d, (70, 528), icon, 30)
     img.convert("RGB").save(os.path.join(ROOT, "05-night-landscape-1200x628.png"))

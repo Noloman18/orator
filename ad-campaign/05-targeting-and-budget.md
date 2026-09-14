@@ -9,9 +9,15 @@ Settings for the first Google App campaign (install objective).
 | Campaign type | App campaign (install goal) |
 | App | Orator — `com.noloxtreme.tts.reader` |
 | Conversion | Installs (Google Play conversion reported by Google) |
-| Bid strategy | Target CPA (install), start $1.50, allow Google to raise to ~$2.00 in the first two weeks of learning |
-| Daily budget | Start $15; raise to $25 once CPI is stable under target |
-| Networks | All: Google Search, Google Play, YouTube, Discover, AdMob |
+| Bid strategy | Install volume with target CPI only after confirming a sustainable target from user value |
+| Starting target CPI | $1.50 only if the economics support it; otherwise use Google Ads bid guidance |
+| Daily budget | At least 50× target CPI for a target-CPI install campaign ($75/day at a $1.50 target) |
+| Inventory | Google automatically serves across Search, Google Play, YouTube, Discover, and the Display Network, including other apps |
+
+The previous $15/day proposal is not sufficient for a $1.50 target-CPI campaign.
+If $75/day is not available, do not treat early performance as conclusive; either
+defer the paid launch or select a campaign/bid approach that Google Ads supports
+for the available budget.
 
 ## Locales (launch)
 
@@ -36,10 +42,9 @@ availability and pricing).
 - **No audience targeting at launch.** App campaigns optimize on their own with
   install signals; manual audiences shrink the learning pool. Let Google find
   readers and accessibility users.
-- **Exclude nothing initially** except obviously invalid placements (Mobvista
-  and similar ad-network inventory is already filtered by Google; review the
-  "Placements" report weekly and exclude any with abnormal CTR but near-zero
-  installs).
+- **Avoid restrictive exclusions at launch.** App campaigns optimize across
+  Google's inventory; review policy and invalid-traffic signals rather than
+  making broad placement exclusions from a small data sample.
 - **Dayparting:** do not enable. App campaigns manage delivery; dayparting
   fights the algorithm and raises CPI.
 - **Ad rotation:** not configurable in App campaigns; refresh creatives instead
@@ -47,9 +52,12 @@ availability and pricing).
 
 ## Budget guardrails
 
-- Stop-and-fix thresholds: if CPI exceeds $4.00 for 5 consecutive days after
-  week 2, cut to $10/day and refresh the weakest two headlines/descriptions.
-- If installs average < 3/day after 2 weeks at $15/day, raise budget to $25 to
-  give the algorithm more signal before judging it.
-- Never change bid by more than ±20% in a day; big swings restart the learning
-  phase.
+- Check whether the campaign is marked "Limited by budget" or "Limited by
+  target" before changing creative or bids.
+- Allow 7–14 days after a meaningful bid, budget, or conversion-action change
+  before judging performance. Evaluate an updated campaign over a 30-day window
+  where possible.
+- Never change a bid or budget by more than ±20% at once; large swings restart
+  the learning phase.
+
+Official reference: [Google Ads App campaign goal and budget guidance](https://support.google.com/google-ads/answer/6167156).

@@ -18,11 +18,11 @@ Ready in `creative/` at exact upload dimensions:
 
 | File | Size | Message |
 | --- | --- | --- |
-| `01-hero-landscape-1200x628.png` | 1200x628 | "No ads. Ever." + phone mockup of the real reader |
-| `02-icon-square-1200x1200.png` | 1200x1200 | App icon block + "No intrusive ads" |
+| `01-hero-landscape-1200x628.png` | 1200x628 | "Reading without ad breaks" + phone mockup of the real reader |
+| `02-icon-square-1200x1200.png` | 1200x1200 | App icon block + "No ad breaks. No pop-ups." |
 | `03-reader-portrait-1200x1500.png` | 1200x1500 | "Read without interruptions" + reader screenshot |
 | `04-books-square-1200x1200.png` | 1200x1200 | "Your books, read aloud" + supported formats |
-| `05-night-landscape-1200x628.png` | 1200x628 | "Peaceful reading" calm night scene |
+| `05-night-landscape-1200x628.png` | 1200x628 | "Peaceful reading" + uninterrupted-book message |
 | `06-drake-style-portrait-1200x1500.png` | 1200x1500 | Before/after meme: frustrated reading vs relaxed listening |
 | `07-commuter-portrait-1200x1500.png` | 1200x1500 | Meme iteration: "Reading on the commute" vs "Listening on the commute" |
 | `08-student-portrait-1200x1500.png` | 1200x1500 | Meme iteration: "Struggling with documents" vs "Letting Orator read them" |
@@ -41,6 +41,11 @@ Source backgrounds and the composition scripts live in `creative/base/`,
 `creative/compose.py`, and `creative/compose-meme*.py` so the set can be
 regenerated or restyled. Swap the headline overlays when refreshing the
 campaign; the backgrounds are reusable.
+
+The launch image set and both HTML5 playables use the qualified
+uninterrupted-book message rather than the former blanket "No ads. Ever."
+promise. Regenerate or rebuild them whenever the approved copy changes; never
+upload an older export carrying that claim.
 
 ## Video assets
 

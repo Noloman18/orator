@@ -5,11 +5,15 @@ Google App campaign (install goal) on Google Ads.
 
 ## The single selling point
 
-Orator has **no intrusive ads that ruin your reading**. No ad breaks, no pop-ups,
-no banners in the middle of a page, no account, no tracking, no internet
-requirement. Most free apps interrupt you with ads every few minutes; Orator
-doesn't. Every creative and every line of copy in this campaign leads with that
-difference.
+Orator keeps the book itself uninterrupted: **no ad breaks, pop-ups, or banners
+while people read or listen**. The Book Notes screen may show one small footer
+ad, but it never covers a page or interrupts narration. The campaign leads with
+that specific, truthful difference—not with a blanket “no ads” claim.
+
+No account is required. Imported documents, reading progress, and private notes
+stay on the device; core reading and narration work offline when an eligible
+Android voice is installed. Advertising does require network access, so campaign
+copy must not promise no tracking, no internet, or no ads anywhere in the app.
 
 ## Folder map
 
@@ -21,12 +25,14 @@ difference.
 | `04-creative-assets.md` | Image and video asset specs, plus how to source each one. |
 | `05-targeting-and-budget.md` | Locale, bid strategy, budget, and network settings. |
 | `06-measurement-and-testing.md` | KPIs, A/B testing plan, and creative refresh cadence. |
+| `07-admob-configuration.md` | Internal test/production IDs and the Book Notes ad-release checklist. |
 
 ## How to use this material
 
 1. Read `01-brief.md` and confirm the budget and KPI targets.
 2. Set up the campaign in Google Ads using the settings in `05-targeting-and-budget.md`.
-3. Paste the copy from `02-ad-copy.md` into the ad group (keep the highest-performing headlines and descriptions after the first two weeks).
+3. Upload the text assets from `02-ad-copy.md`; each one must make sense when
+   Google combines it with another asset.
 4. Produce the video scripts from `03-video-scripts.md` and prepare the assets per `04-creative-assets.md`.
 5. Track the results against the plan in `06-measurement-and-testing.md`.
 
@@ -36,4 +42,6 @@ difference.
 - Campaign type: Google App campaigns — install objective.
 - Ad text limits: headlines ≤ 30 characters, descriptions ≤ 90 characters. Every line in `02-ad-copy.md` has been verified against these limits.
 - Brand: deep teal `#285E61`, white, Roman orator motif, tagline "Turn any document into speech" (see `artwork/`).
-- All claims made in ads must be true of the shipped app: no ads, no account, no uploads, offline TTS with installed voices (see `playstore-docs/`).
+- All claims made in ads must match the shipped app: ad-free reading and
+  narration, a Book Notes footer ad, no account, local documents/notes, and
+  offline-capable TTS with installed voices (see `playstore-docs/`).

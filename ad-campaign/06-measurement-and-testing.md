@@ -7,25 +7,31 @@ How to judge the campaign and keep improving it.
 | Checkpoint | Metric | Decision rule |
 | --- | --- | --- |
 | Week 1 | Learn phase completes; impressions ramp | No changes to bid, budget, or targeting. Only review creative status. |
-| Week 2 | CPI, install volume, ad strength | If ad strength < "Good", add the alternate headlines/descriptions from `02-ad-copy.md`. |
-| Week 4 | CPI vs $1.50 target; CTR by asset | Promote/keep the top-performing assets; drop the bottom 20% and replace with alternates. |
-| Week 8 | CPI, install rate, D30 retention | Keep or scale budget 20-25%; if CPI > $2.50, re-open `01-brief.md` assumptions. |
+| Week 2 | CPI, install volume, asset coverage | Check the asset report; add missing text, image, or video types rather than reacting to early CPI. |
+| Week 4 | CPI vs target; CTR and cost by asset | Add new variations for weak assets; keep delivery history until replacements have enough data. |
+| Week 8 | CPI, install rate, D30 retention | Scale only if the campaign has sufficient budget and results support the target; otherwise change one constraint after learning. |
 
 Lag time: Play-reported installs lag up to a few hours; retention data lags
 30 days. Do not judge retention before it exists.
 
-## A/B structure
+## Creative testing structure
 
-Run the primary campaign as the "no-ads" theme (current material). After week 4,
-clone it into a second campaign with the product-angle headlines/descriptions
-swapped in and a 50/50 budget split for two weeks:
+Use one primary install campaign at launch. Do not clone a second App campaign
+with the same geography just to test creative: the campaigns can compete for the
+same users. Google also mixes text and visual assets, so judge individual asset
+performance rather than treating every text/image pairing as a controlled A/B
+test.
 
-- Campaign A — "No ads" messaging (current copy).
-- Campaign B — "Product" messaging (the Angle 3 alternates in `02-ad-copy.md`).
+Keep two message families in the asset library:
 
-Keep both under the same target CPA and locale set so the only variable is
-creative. Whichever wins on CPI wins the budget; the loser gets paused, not
-deleted (it may win again after a creative refresh).
+- **Uninterrupted book** — ad-free reading and listening, no pop-ups, no ad
+  breaks in a book.
+- **Product** — document-to-speech, offline-capable narration, audio export,
+  and book notes.
+
+After an asset has enough delivery, add a replacement variation for a weak
+asset. Only create a separate App campaign for a genuinely different optimization
+goal or a non-overlapping geography.
 
 ## Creative refresh cadence
 
@@ -42,13 +48,16 @@ deleted (it may win again after a creative refresh).
 | Signal | Likely cause | Action |
 | --- | --- | --- |
 | High CTR, low install rate | Listing mismatch or misleading ad | Compare ad claim vs listing; adjust the ad copy, not the listing. |
-| High installs, low D30 retention | Wrong audience found by the algorithm | Try Campaign B theme; add a "no ads" clarification to the Play full description. |
-| Sudden CPI spike > 3x average | Creative fatigue or invalid placement | Pause top-2 by spend, refresh creatives. |
-| Store reviews mentioning "expected ads" | Positioning mismatch | Reinforce the no-ads promise on the listing short description. |
+| High installs, low D30 retention | Wrong audience or weak first-use experience | Refresh with the product message and review onboarding/first-book completion. |
+| Sudden CPI spike > 3x average | Creative fatigue, budget constraint, or a learning reset | Check campaign status and recent edits, then add a replacement asset. |
+| Store reviews mentioning unexpected ads | Positioning mismatch | Make the Book Notes footer-ad disclosure clearer; never widen the ad-free claim. |
 
 ## Post-launch review (week 12)
 
 Reassess the entire campaign against `01-brief.md`: CPI trend, install volume,
-store conversion rate, and whether the no-ads claim is still true in the shipped
-app (it must remain the honest differentiator). Decide: scale budget up to
-$50/day, launch campaign B in new locales, or pause and fix the funnel first.
+store conversion rate, retention where measured, and whether the uninterrupted-
+book claim is still true in the shipped app. Decide: scale a budget that meets
+Google's bid-to-budget guidance, expand to a new locale, or pause and fix the
+funnel first.
+
+Official reference: [Google Ads App campaign maintenance and asset guidance](https://support.google.com/google-ads/answer/9176652).
