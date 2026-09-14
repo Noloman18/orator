@@ -13,6 +13,7 @@ Release artifacts and submission notes for the Google Play listing of Orator.
 - `privacy-policy.md` — privacy policy draft ready to host publicly after replacing its placeholders.
 - `data-safety.md` — Data safety form worksheet based on the current source audit.
 - `asset-inventory.md` — dimensions, alt text, and upload notes for each asset.
+- `foreground-service-video.md` — YouTube link, source file location, and upload instructions for the FGS declaration video.
 - `play-console-checklist.md` — remaining Play Console and release steps.
 
 ## Current release metadata

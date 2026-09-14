@@ -1,11 +1,14 @@
 package com.noloxtreme.tts.reader.ui
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.paging.PagingData
 import androidx.paging.cachedIn
 import com.noloxtreme.tts.reader.domain.ContentRepository
 import com.noloxtreme.tts.reader.domain.AudioExporter
+import com.noloxtreme.tts.reader.domain.BookNote
+import com.noloxtreme.tts.reader.domain.BookNoteRepository
 import com.noloxtreme.tts.reader.domain.Document
 import com.noloxtreme.tts.reader.domain.DocumentId
 import com.noloxtreme.tts.reader.domain.DocumentPosition
@@ -23,6 +26,7 @@ import com.noloxtreme.tts.reader.domain.Paragraph
 import com.noloxtreme.tts.reader.domain.ReaderPosition
 import com.noloxtreme.tts.reader.domain.ReadingProgress
 import com.noloxtreme.tts.reader.domain.SpokenRange
+import com.noloxtreme.tts.reader.domain.TimeProvider
 import com.noloxtreme.tts.reader.domain.blockAtNarratableRank
 import com.noloxtreme.tts.reader.domain.narrationOffsetInBlock
 import com.noloxtreme.tts.reader.domain.narrationText
@@ -45,6 +49,9 @@ import com.noloxtreme.tts.reader.domain.usecase.SeekNarration
 import com.noloxtreme.tts.reader.domain.usecase.SkipSentence
 import com.noloxtreme.tts.reader.domain.usecase.StartOrResumeNarration
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.File
+import java.util.UUID
 import javax.inject.Inject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -67,6 +74,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 
 sealed interface ReaderLoadState {
     data object Loading : ReaderLoadState
@@ -108,7 +117,10 @@ class ReaderViewModel @Inject constructor(
     private val observeReaderPosition: ObserveReaderPosition,
     private val saveReaderPosition: SaveReaderPosition,
     val narrationController: NarrationController,
-    private val audioExporter: AudioExporter
+    private val audioExporter: AudioExporter,
+    private val bookNoteRepository: BookNoteRepository,
+    private val timeProvider: TimeProvider,
+    @ApplicationContext private val appContext: Context
 ) : ViewModel() {
     private val pageRequest = MutableStateFlow<DocumentId?>(null)
     private val initialParagraph = MutableStateFlow(0)
@@ -204,12 +216,83 @@ class ReaderViewModel @Inject constructor(
     /** One-shot snackbar events for terminal export outcomes. */
     val exportMessages: SharedFlow<ExportMessage> = mutableExportMessages.asSharedFlow()
 
+    private val mutableNoteMessages = MutableSharedFlow<NoteMessage>(extraBufferCapacity = 4)
+    val noteMessages: SharedFlow<NoteMessage> = mutableNoteMessages.asSharedFlow()
+
+    val notes: StateFlow<List<BookNote>> = pageRequest.flatMapLatest { id ->
+        if (id == null) flowOf(emptyList()) else bookNoteRepository.observeNotes(id)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     fun exportAudio() {
         pageRequest.value?.let { id -> audioExporter.export(id) }
     }
 
     fun cancelExport() {
         pageRequest.value?.let { id -> audioExporter.cancel(id) }
+    }
+
+    /** Captures the current narration or silent-reading location for a new note. */
+    fun currentNotePosition(): DocumentPosition = when {
+        mutableReadMode.value -> mutableVisualReading.value.activeWord?.position
+            ?: progress.value?.position
+        else -> narrationController.state.value.positionOrNull() ?: progress.value?.position
+    } ?: DocumentPosition(paragraphIndex = 0, offsetInParagraph = 0, absoluteOffset = 0L)
+
+    /** Freezes the current reading point before a note is written or recorded. */
+    fun captureNotePositionAndPause(): DocumentPosition {
+        val position = currentNotePosition()
+        if (mutableReadMode.value) {
+            stopVisualReading(clearCursor = false)
+        } else {
+            pauseNarration.execute()
+        }
+        return position
+    }
+
+    fun saveNote(
+        text: String,
+        voiceRecording: VoiceNoteRecording?,
+        position: DocumentPosition
+    ) {
+        val documentId = pageRequest.value ?: return
+        val normalizedText = text.trim().takeIf { it.isNotEmpty() }
+        if (normalizedText == null && voiceRecording == null) return
+        viewModelScope.launch {
+            val noteId = UUID.randomUUID().toString()
+            var storedVoice: StoredVoice? = null
+            try {
+                storedVoice = withContext(Dispatchers.IO) {
+                    voiceRecording?.let { storeVoiceRecording(documentId, noteId, it) }
+                }
+                bookNoteRepository.save(
+                    BookNote(
+                        id = noteId,
+                        documentId = documentId,
+                        position = position,
+                        text = normalizedText,
+                        voiceRelativePath = storedVoice?.relativePath,
+                        voiceDurationMillis = storedVoice?.durationMillis,
+                        createdAtEpochMillis = timeProvider.nowEpochMillis()
+                    )
+                )
+                withContext(Dispatchers.IO) { voiceRecording?.file?.delete() }
+                mutableNoteMessages.emit(NoteMessage.Saved)
+            } catch (_: Throwable) {
+                withContext(Dispatchers.IO) {
+                    storedVoice?.file?.delete()
+                }
+                mutableNoteMessages.emit(NoteMessage.Failed)
+            }
+        }
+    }
+
+    /** Returns the reader to the position a note was captured from. */
+    fun goToNote(position: DocumentPosition) {
+        if (mutableReadMode.value) {
+            seekVisualToAbsoluteOffset(position.absoluteOffset)
+        } else {
+            seekNarration.execute(position)
+        }
     }
 
     init {
@@ -261,6 +344,27 @@ class ReaderViewModel @Inject constructor(
             pageRequest.value = null
             load(id)
         }
+    }
+
+    private fun storeVoiceRecording(
+        documentId: DocumentId,
+        noteId: String,
+        recording: VoiceNoteRecording
+    ): StoredVoice {
+        require(recording.file.isFile && recording.file.length() > 0L) { "Voice recording is empty" }
+        val notesRoot = File(appContext.filesDir, "voice-notes").canonicalFile
+        check(notesRoot.exists() || notesRoot.mkdirs()) { "Unable to create voice note storage" }
+        val documentDirectory = File(notesRoot, documentId.value).canonicalFile
+        require(documentDirectory.parentFile == notesRoot) { "Invalid document note path" }
+        check(documentDirectory.exists() || documentDirectory.mkdirs()) { "Unable to create document note storage" }
+        val destination = File(documentDirectory, "$noteId.m4a").canonicalFile
+        require(destination.parentFile == documentDirectory) { "Invalid voice note destination" }
+        recording.file.copyTo(destination, overwrite = false)
+        return StoredVoice(
+            relativePath = "voice-notes/${documentId.value}/$noteId.m4a",
+            durationMillis = recording.durationMillis,
+            file = destination
+        )
     }
 
     fun play() = startOrResumeNarration.execute()
@@ -734,6 +838,17 @@ class ReaderViewModel @Inject constructor(
         return contentRepository.paragraph(id, progressIndex)?.sectionIndex?.plus(coverOffset) ?: 0
     }
 }
+
+sealed interface NoteMessage {
+    data object Saved : NoteMessage
+    data object Failed : NoteMessage
+}
+
+private data class StoredVoice(
+    val relativePath: String,
+    val durationMillis: Long,
+    val file: File
+)
 
 private fun NarrationState.documentIdOrNull(): DocumentId? = when (this) {
     is NarrationState.Preparing -> documentId

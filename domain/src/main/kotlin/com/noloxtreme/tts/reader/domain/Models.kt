@@ -92,6 +92,26 @@ data class ReaderPosition(
     }
 }
 
+/** A user-created text and/or voice note anchored to one exact place in a book. */
+data class BookNote(
+    val id: String,
+    val documentId: DocumentId,
+    val position: DocumentPosition,
+    val text: String?,
+    /** Relative path inside private app storage; never a shared-storage URI. */
+    val voiceRelativePath: String?,
+    val voiceDurationMillis: Long?,
+    val createdAtEpochMillis: Long
+) {
+    init {
+        require(id.isNotBlank())
+        require(text?.isNotBlank() == true || voiceRelativePath != null)
+        require(voiceRelativePath == null || voiceDurationMillis != null)
+        require(voiceDurationMillis == null || voiceDurationMillis >= 0L)
+        require(createdAtEpochMillis >= 0L)
+    }
+}
+
 const val FAST_JUMP_SENTENCE_COUNT = 5
 
 /** Rates offered by the playback speed button, in the order it cycles through them. */
@@ -251,6 +271,11 @@ interface ProgressRepository {
 interface ReaderPositionRepository {
     fun observe(id: DocumentId): Flow<ReaderPosition?>
     suspend fun save(id: DocumentId, position: ReaderPosition)
+}
+
+interface BookNoteRepository {
+    fun observeNotes(documentId: DocumentId): Flow<List<BookNote>>
+    suspend fun save(note: BookNote)
 }
 
 interface SettingsRepository {

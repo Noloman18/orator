@@ -112,3 +112,28 @@ data class ReaderPositionEntity(
     val spineIndex: Int,
     val pageIndex: Int
 )
+
+/** A private note linked to a document and an exact text position in that document. */
+@Entity(
+    tableName = "book_notes",
+    foreignKeys = [
+        ForeignKey(
+            entity = DocumentEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["documentId"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ],
+    indices = [Index(value = ["documentId", "createdAt"])]
+)
+data class BookNoteEntity(
+    @androidx.room.PrimaryKey val id: String,
+    val documentId: String,
+    val paragraphIndex: Int,
+    val offsetInParagraph: Int,
+    val absoluteOffset: Long,
+    val text: String?,
+    val voiceRelativePath: String?,
+    val voiceDurationMillis: Long?,
+    val createdAt: Long
+)

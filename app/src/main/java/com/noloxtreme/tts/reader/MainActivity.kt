@@ -6,10 +6,12 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.lifecycleScope
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import com.google.android.gms.ads.MobileAds
 import com.noloxtreme.tts.reader.domain.SettingsRepository
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -26,6 +28,9 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             withTimeoutOrNull(1_000L) { settingsRepository.observeSettings().first() }
             settingsLoaded = true
+        }
+        lifecycleScope.launch(Dispatchers.IO) {
+            MobileAds.initialize(this@MainActivity) {}
         }
         setContent { OratorApp() }
     }

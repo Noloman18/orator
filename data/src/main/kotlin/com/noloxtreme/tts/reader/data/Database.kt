@@ -11,9 +11,10 @@ import androidx.room.TypeConverters
         SectionEntity::class,
         ParagraphEntity::class,
         ReadingProgressEntity::class,
-        ReaderPositionEntity::class
+        ReaderPositionEntity::class,
+        BookNoteEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = true
 )
 @TypeConverters(DatabaseConverters::class)
@@ -23,6 +24,7 @@ abstract class OratorDatabase : RoomDatabase() {
     abstract fun contentDao(): ContentDao
     abstract fun progressDao(): ProgressDao
     abstract fun readerPositionDao(): ReaderPositionDao
+    abstract fun bookNoteDao(): BookNoteDao
 }
 
 class DatabaseConverters {

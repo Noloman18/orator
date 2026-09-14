@@ -153,3 +153,18 @@ interface ReaderPositionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(position: ReaderPositionEntity)
 }
+
+@Dao
+interface BookNoteDao {
+    @Query(
+        """
+        SELECT * FROM book_notes
+        WHERE documentId = :documentId
+        ORDER BY createdAt DESC, id DESC
+        """
+    )
+    fun observeForDocument(documentId: String): Flow<List<BookNoteEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insert(note: BookNoteEntity)
+}

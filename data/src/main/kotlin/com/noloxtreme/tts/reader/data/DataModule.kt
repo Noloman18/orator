@@ -3,11 +3,13 @@ package com.noloxtreme.tts.reader.data
 import android.content.Context
 import androidx.room.Room
 import com.noloxtreme.tts.reader.domain.ContentRepository
+import com.noloxtreme.tts.reader.domain.BookNoteRepository
 import com.noloxtreme.tts.reader.domain.DocumentImporter
 import com.noloxtreme.tts.reader.domain.DocumentRepository
 import com.noloxtreme.tts.reader.domain.EpubContentStore
 import com.noloxtreme.tts.reader.domain.ProgressRepository
 import com.noloxtreme.tts.reader.domain.ReaderPositionRepository
+import com.noloxtreme.tts.reader.domain.ReviewPromptRepository
 import com.noloxtreme.tts.reader.domain.SettingsRepository
 import com.noloxtreme.tts.reader.domain.TimeProvider
 import dagger.Binds
@@ -42,7 +44,17 @@ abstract class DataBindingsModule {
 
     @Binds
     @Singleton
+    abstract fun bindBookNoteRepository(implementation: RoomBookNoteRepository): BookNoteRepository
+
+    @Binds
+    @Singleton
     abstract fun bindSettingsRepository(implementation: DataStoreSettingsRepository): SettingsRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindReviewPromptRepository(
+        implementation: DataStoreReviewPromptRepository
+    ): ReviewPromptRepository
 
     @Binds
     @Singleton
@@ -71,6 +83,7 @@ object DataProvidersModule {
     fun provideDatabase(@ApplicationContext context: Context): OratorDatabase =
         Room.databaseBuilder(context, OratorDatabase::class.java, "orator.db")
             .addMigrations(MIGRATION_1_2)
+            .addMigrations(MIGRATION_2_3)
             .build()
 
     @Provides
@@ -110,4 +123,7 @@ object DataProvidersModule {
     @Provides
     fun provideReaderPositionDao(database: OratorDatabase): ReaderPositionDao =
         database.readerPositionDao()
+
+    @Provides
+    fun provideBookNoteDao(database: OratorDatabase): BookNoteDao = database.bookNoteDao()
 }

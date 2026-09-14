@@ -6,6 +6,8 @@ import androidx.paging.PagingConfig
 import androidx.paging.PagingData
 import androidx.paging.map
 import androidx.room.withTransaction
+import com.noloxtreme.tts.reader.domain.BookNote
+import com.noloxtreme.tts.reader.domain.BookNoteRepository
 import com.noloxtreme.tts.reader.domain.ContentRepository
 import com.noloxtreme.tts.reader.domain.Document
 import com.noloxtreme.tts.reader.domain.DocumentId
@@ -57,10 +59,17 @@ class RoomDocumentRepository @Inject constructor(
                 database.documentDao().deleteById(id.value)
             }
             tombstone.deleteRecursively()
+            deleteVoiceNotes(id)
         } catch (error: Throwable) {
             if (tombstone.exists()) tombstone.renameTo(sourceDirectory)
             throw error
         }
+    }
+
+    private fun deleteVoiceNotes(id: DocumentId) {
+        val notesRoot = context.filesDir.resolve("voice-notes").canonicalFile
+        val documentNotes = notesRoot.resolve(id.value).canonicalFile
+        if (documentNotes.parentFile == notesRoot) documentNotes.deleteRecursively()
     }
 }
 
@@ -151,6 +160,18 @@ class RoomReaderPositionRepository @Inject constructor(
 
     override suspend fun save(id: DocumentId, position: ReaderPosition) {
         dao.upsert(position.toEntity(id))
+    }
+}
+
+@Singleton
+class RoomBookNoteRepository @Inject constructor(
+    private val dao: BookNoteDao
+) : BookNoteRepository {
+    override fun observeNotes(documentId: DocumentId): Flow<List<BookNote>> =
+        dao.observeForDocument(documentId.value).map { rows -> rows.map(BookNoteEntity::toDomain) }
+
+    override suspend fun save(note: BookNote) {
+        dao.insert(note.toEntity())
     }
 }
 
@@ -255,6 +276,28 @@ private fun ReaderPositionEntity.toDomain() = ReaderPosition(spineIndex, pageInd
 
 private fun ReaderPosition.toEntity(id: DocumentId) =
     ReaderPositionEntity(id.value, spineIndex, pageIndex)
+
+private fun BookNoteEntity.toDomain() = BookNote(
+    id = id,
+    documentId = DocumentId(documentId),
+    position = DocumentPosition(paragraphIndex, offsetInParagraph, absoluteOffset),
+    text = text,
+    voiceRelativePath = voiceRelativePath,
+    voiceDurationMillis = voiceDurationMillis,
+    createdAtEpochMillis = createdAt
+)
+
+private fun BookNote.toEntity() = BookNoteEntity(
+    id = id,
+    documentId = documentId.value,
+    paragraphIndex = position.paragraphIndex,
+    offsetInParagraph = position.offsetInParagraph,
+    absoluteOffset = position.absoluteOffset,
+    text = text,
+    voiceRelativePath = voiceRelativePath,
+    voiceDurationMillis = voiceDurationMillis,
+    createdAt = createdAtEpochMillis
+)
 
 private fun Paragraph.positionAt(offset: Int): DocumentPosition =
     DocumentPosition(paragraphIndex, offset.coerceIn(0, text.length), absoluteStart + offset)

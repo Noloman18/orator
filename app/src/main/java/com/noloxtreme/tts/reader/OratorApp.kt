@@ -13,6 +13,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -60,6 +62,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarDuration
@@ -73,6 +76,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.FilterChip
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -102,6 +106,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -113,6 +118,7 @@ import androidx.core.content.ContextCompat
 import com.noloxtreme.tts.reader.domain.Document
 import com.noloxtreme.tts.reader.domain.DocumentId
 import com.noloxtreme.tts.reader.domain.DocumentPosition
+import com.noloxtreme.tts.reader.domain.BookNote
 import com.noloxtreme.tts.reader.domain.EPUB_MIME_TYPE
 import com.noloxtreme.tts.reader.domain.ExportError
 import com.noloxtreme.tts.reader.domain.ExportState
@@ -137,13 +143,22 @@ import com.noloxtreme.tts.reader.ui.LibraryLoadState
 import com.noloxtreme.tts.reader.ui.ReaderViewModel
 import com.noloxtreme.tts.reader.ui.ReaderLoadState
 import com.noloxtreme.tts.reader.ui.ReaderTransport
+import com.noloxtreme.tts.reader.ui.VoiceNotePlayer
+import com.noloxtreme.tts.reader.ui.VoiceNoteRecorder
+import com.noloxtreme.tts.reader.ui.VoiceNoteRecording
 import com.noloxtreme.tts.reader.ui.EpubReaderPane
 import com.noloxtreme.tts.reader.ui.EpubTocSheet
 import com.noloxtreme.tts.reader.ui.lineHeightMultiplier
 import com.noloxtreme.tts.reader.ui.SettingsViewModel
 import com.noloxtreme.tts.reader.ui.theme.OratorTheme
+import com.google.android.gms.ads.AdRequest
+import com.google.android.gms.ads.AdSize
+import com.google.android.gms.ads.AdView
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import java.io.File
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
@@ -152,6 +167,8 @@ private const val SETTINGS_ROUTE = "settings"
 private const val EXPORTS_ROUTE = "exports"
 private const val READER_ROUTE = "reader/{documentId}"
 private const val SPLASH_DURATION_MILLIS = 5_000L
+/** Google's anchored adaptive banner test unit. Never replace this with an app-ads.txt entry. */
+private const val TEST_NOTES_BANNER_AD_UNIT_ID = "ca-app-pub-3940256099942544/9214589741"
 private val SUPPORTED_PICKER_MIME_TYPES = arrayOf(
     "text/plain",
     "text/markdown",
@@ -163,6 +180,8 @@ private val SUPPORTED_PICKER_MIME_TYPES = arrayOf(
 @Composable
 fun OratorApp(appViewModel: AppViewModel = hiltViewModel()) {
     val settings by appViewModel.settings.collectAsState()
+    val showReviewPrompt by appViewModel.showReviewPrompt.collectAsState()
+    val context = LocalContext.current
     val darkTheme = when (settings.theme) {
         ThemePreference.DARK -> true
         ThemePreference.LIGHT -> false
@@ -180,6 +199,14 @@ fun OratorApp(appViewModel: AppViewModel = hiltViewModel()) {
             OratorSplashScreen()
         } else {
             val navController = rememberNavController()
+            LaunchedEffect(navController) {
+                navController.currentBackStackEntryFlow
+                    .map { it.destination.route }
+                    .distinctUntilChanged()
+                    .collect { route ->
+                        if (route == LIBRARY_ROUTE) appViewModel.recordLibraryLanding()
+                    }
+            }
             NavHost(
                 navController = navController,
                 startDestination = LIBRARY_ROUTE,
@@ -189,7 +216,14 @@ fun OratorApp(appViewModel: AppViewModel = hiltViewModel()) {
                     LibraryScreen(
                         onOpenDocument = { id -> navController.navigate("reader/" + id.value) },
                         onOpenSettings = { navController.navigate(SETTINGS_ROUTE) },
-                        onOpenExports = { navController.navigate(EXPORTS_ROUTE) }
+                        onOpenExports = { navController.navigate(EXPORTS_ROUTE) },
+                        showReviewPrompt = showReviewPrompt,
+                        onReview = {
+                            appViewModel.completeReviewPrompt()
+                            openPlayStoreReview(context)
+                        },
+                        onReviewLater = appViewModel::remindForReviewLater,
+                        onReviewDeclined = appViewModel::completeReviewPrompt
                     )
                 }
                 composable(
@@ -258,6 +292,10 @@ private fun LibraryScreen(
     onOpenDocument: (DocumentId) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenExports: () -> Unit,
+    showReviewPrompt: Boolean,
+    onReview: () -> Unit,
+    onReviewLater: () -> Unit,
+    onReviewDeclined: () -> Unit,
     viewModel: LibraryViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
@@ -395,6 +433,51 @@ private fun LibraryScreen(
             dismissButton = { TextButton(onClick = { documentToDelete = null }) { Text(stringResource(R.string.cancel)) } }
         )
     }
+
+    if (showReviewPrompt && libraryState is LibraryLoadState.Ready) {
+        ReviewPromptDialog(
+            onReview = onReview,
+            onLater = onReviewLater,
+            onDecline = onReviewDeclined
+        )
+    }
+}
+
+@Composable
+private fun ReviewPromptDialog(
+    onReview: () -> Unit,
+    onLater: () -> Unit,
+    onDecline: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onLater,
+        title = { Text(stringResource(R.string.review_prompt_title)) },
+        text = { Text(stringResource(R.string.review_prompt_body)) },
+        confirmButton = {
+            Button(onClick = onReview) { Text(stringResource(R.string.review_prompt_review)) }
+        },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onLater) { Text(stringResource(R.string.review_prompt_later)) }
+                TextButton(onClick = onDecline) { Text(stringResource(R.string.review_prompt_decline)) }
+            }
+        }
+    )
+}
+
+private fun openPlayStoreReview(context: Context) {
+    val packageName = context.packageName
+    val storeIntent = Intent(
+        Intent.ACTION_VIEW,
+        Uri.parse("market://details?id=$packageName")
+    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    val webIntent = Intent(
+        Intent.ACTION_VIEW,
+        Uri.parse("https://play.google.com/store/apps/details?id=$packageName")
+    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+    runCatching { context.startActivity(storeIntent) }
+        .recoverCatching { context.startActivity(webIntent) }
 }
 
 @Composable
@@ -525,6 +608,7 @@ private fun ReaderScreen(
     val inReadMode by viewModel.readMode.collectAsState()
     val visualReading by viewModel.visualReading.collectAsState()
     val epubReading by viewModel.epubReading.collectAsState()
+    val notes by viewModel.notes.collectAsState()
     val transport by viewModel.transport.collectAsState()
     val readerPageIndex by viewModel.readerPageIndex.collectAsState()
     val readerJumpTarget by viewModel.readerJumpTarget.collectAsState()
@@ -556,6 +640,9 @@ private fun ReaderScreen(
     var seekFraction by remember(documentId) { mutableStateOf(0f) }
     var isSeeking by remember(documentId) { mutableStateOf(false) }
     var chromeVisible by rememberSaveable { mutableStateOf(true) }
+    var showNoteComposer by remember(documentId) { mutableStateOf(false) }
+    var showBookNotes by remember(documentId) { mutableStateOf(false) }
+    var notePosition by remember(documentId) { mutableStateOf(DocumentPosition(0, 0, 0L)) }
 
     val exportState by viewModel.exportState.collectAsState()
     val exportSnackbar = remember { SnackbarHostState() }
@@ -614,6 +701,19 @@ private fun ReaderScreen(
                     )
                 )
             }
+        }
+    }
+    LaunchedEffect(Unit) {
+        viewModel.noteMessages.collect { message ->
+            exportSnackbar.showSnackbar(
+                context.getString(
+                    if (message is com.noloxtreme.tts.reader.ui.NoteMessage.Saved) {
+                        R.string.note_saved
+                    } else {
+                        R.string.note_save_failed
+                    }
+                )
+            )
         }
     }
 
@@ -708,6 +808,11 @@ private fun ReaderScreen(
                             exportState = exportState,
                             onExport = requestExport,
                             onCancelExport = viewModel::cancelExport,
+                            onMakeNote = {
+                                notePosition = viewModel.captureNotePositionAndPause()
+                                showNoteComposer = true
+                            },
+                            onOpenNotes = { showBookNotes = true },
                             onOpenExports = onOpenExports,
                             onOpenSettings = onOpenSettings
                         )
@@ -947,6 +1052,283 @@ private fun ReaderScreen(
             onDismiss = { tocSheetVisible = false }
         )
     }
+    if (showNoteComposer) {
+        NoteComposerDialog(
+            onSave = { text, voiceRecording ->
+                viewModel.saveNote(text, voiceRecording, notePosition)
+                showNoteComposer = false
+            },
+            onDismiss = { showNoteComposer = false }
+        )
+    }
+    if (showBookNotes) {
+        BookNotesDialog(
+            notes = notes,
+            totalCharacterCount = totalCharacterCount,
+            onOpenNote = { note ->
+                viewModel.goToNote(note.position)
+                showBookNotes = false
+            },
+            onDismiss = { showBookNotes = false }
+        )
+    }
+}
+
+@Composable
+private fun NoteComposerDialog(
+    onSave: (String, VoiceNoteRecording?) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val recorder = remember(context) { VoiceNoteRecorder(context) }
+    val handedOff = remember { mutableStateOf(false) }
+    var text by rememberSaveable { mutableStateOf("") }
+    var voiceRecording by remember { mutableStateOf<VoiceNoteRecording?>(null) }
+    var recordingError by remember { mutableStateOf<String?>(null) }
+
+    fun startRecording() {
+        voiceRecording?.file?.delete()
+        voiceRecording = null
+        recordingError = if (recorder.start()) null else context.getString(R.string.note_recording_failed)
+    }
+
+    val microphonePermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) startRecording()
+        else recordingError = context.getString(R.string.note_microphone_permission_needed)
+    }
+
+    DisposableEffect(recorder) {
+        onDispose {
+            if (!handedOff.value) {
+                recorder.discard()
+                voiceRecording?.file?.delete()
+            }
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.make_note)) },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(stringResource(R.string.note_anchor_hint))
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    label = { Text(stringResource(R.string.note_text_label)) },
+                    placeholder = { Text(stringResource(R.string.note_text_placeholder)) },
+                    minLines = 3,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (recorder.isRecording) {
+                    Text(
+                        stringResource(R.string.note_recording),
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    OutlinedButton(onClick = {
+                        voiceRecording = recorder.stop()
+                        if (voiceRecording == null) {
+                            recordingError = context.getString(R.string.note_recording_failed)
+                        }
+                    }) {
+                        Text(stringResource(R.string.note_stop_recording))
+                    }
+                } else {
+                    OutlinedButton(onClick = {
+                        if (
+                            ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.RECORD_AUDIO
+                            ) == PackageManager.PERMISSION_GRANTED
+                        ) {
+                            startRecording()
+                        } else {
+                            microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+                        }
+                    }) {
+                        Text(
+                            stringResource(
+                                if (voiceRecording == null) {
+                                    R.string.note_record_voice
+                                } else {
+                                    R.string.note_replace_voice
+                                }
+                            )
+                        )
+                    }
+                }
+                voiceRecording?.let { recording ->
+                    Text(
+                        stringResource(
+                            R.string.note_voice_ready,
+                            voiceNoteDurationLabel(recording.durationMillis)
+                        ),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                recordingError?.let { error ->
+                    Text(error, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    handedOff.value = true
+                    onSave(text, voiceRecording)
+                },
+                enabled = !recorder.isRecording && (text.isNotBlank() || voiceRecording != null)
+            ) { Text(stringResource(R.string.save_note)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+        }
+    )
+}
+
+@Composable
+private fun BookNotesDialog(
+    notes: List<BookNote>,
+    totalCharacterCount: Long,
+    onOpenNote: (BookNote) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    var playingNoteId by remember { mutableStateOf<String?>(null) }
+    val voicePlayer = remember {
+        VoiceNotePlayer { playingNoteId = null }
+    }
+    DisposableEffect(voicePlayer) {
+        onDispose { voicePlayer.stop() }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.book_notes)) },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                if (notes.isEmpty()) {
+                    Text(stringResource(R.string.no_book_notes))
+                } else {
+                    notes.forEach { note ->
+                        val progress = if (totalCharacterCount > 0L) {
+                            ((note.position.absoluteOffset * 100L) / totalCharacterCount)
+                                .toInt()
+                                .coerceIn(0, 100)
+                        } else {
+                            0
+                        }
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    voicePlayer.stop()
+                                    onOpenNote(note)
+                                }
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    stringResource(R.string.note_position, progress),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                note.text?.let { noteText ->
+                                    Text(noteText, style = MaterialTheme.typography.bodyMedium)
+                                }
+                                note.voiceRelativePath?.let { relativePath ->
+                                    val voiceFile = File(context.filesDir, relativePath)
+                                    TextButton(
+                                        onClick = {
+                                            if (voiceFile.isFile) {
+                                                playingNoteId = if (voicePlayer.toggle(note.id, voiceFile)) {
+                                                    note.id
+                                                } else {
+                                                    null
+                                                }
+                                            }
+                                        },
+                                        enabled = voiceFile.isFile
+                                    ) {
+                                        Text(
+                                            stringResource(
+                                                if (playingNoteId == note.id) {
+                                                    R.string.stop_voice_note
+                                                } else {
+                                                    R.string.play_voice_note
+                                                },
+                                                voiceNoteDurationLabel(note.voiceDurationMillis ?: 0L)
+                                            )
+                                        )
+                                    }
+                                    if (!voiceFile.isFile) {
+                                        Text(
+                                            stringResource(R.string.voice_note_unavailable),
+                                            color = MaterialTheme.colorScheme.error,
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.End
+            ) {
+                TestNotesBannerAd()
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.done)) }
+            }
+        }
+    )
+}
+
+@Composable
+private fun TestNotesBannerAd() {
+    val context = LocalContext.current
+    val adView = remember(context) {
+        val adWidth = context.resources.displayMetrics.run {
+            (widthPixels / density).toInt().coerceAtLeast(1)
+        }
+        AdView(context).apply {
+            adUnitId = TEST_NOTES_BANNER_AD_UNIT_ID
+            setAdSize(AdSize.getCurrentOrientationAnchoredAdaptiveBannerAdSize(context, adWidth))
+        }
+    }
+    DisposableEffect(adView) {
+        adView.loadAd(AdRequest.Builder().build())
+        onDispose { adView.destroy() }
+    }
+    AndroidView(
+        factory = { adView },
+        modifier = Modifier.fillMaxWidth()
+    )
+}
+
+private fun voiceNoteDurationLabel(durationMillis: Long): String {
+    val totalSeconds = (durationMillis / 1_000L).coerceAtLeast(0L)
+    val minutes = totalSeconds / 60L
+    val seconds = totalSeconds % 60L
+    return "$minutes:${seconds.toString().padStart(2, '0')}"
 }
 
 @Composable
@@ -1386,6 +1768,8 @@ private fun ExportAndSettingsMenu(
     exportState: ExportState,
     onExport: () -> Unit,
     onCancelExport: () -> Unit,
+    onMakeNote: () -> Unit,
+    onOpenNotes: () -> Unit,
     onOpenExports: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
@@ -1395,6 +1779,21 @@ private fun ExportAndSettingsMenu(
             Icon(Icons.Outlined.MoreVert, contentDescription = stringResource(R.string.more_actions))
         }
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.make_note)) },
+                onClick = {
+                    menuOpen = false
+                    onMakeNote()
+                }
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.book_notes)) },
+                onClick = {
+                    menuOpen = false
+                    onOpenNotes()
+                }
+            )
+            HorizontalDivider()
             val exporting = exportState is ExportState.Enqueued ||
                 exportState is ExportState.Running
             if (exporting) {

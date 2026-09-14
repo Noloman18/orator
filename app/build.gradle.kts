@@ -96,6 +96,7 @@ dependencies {
     implementation(libs.androidx.hilt.navigation.compose)
     implementation(libs.androidx.hilt.android)
     implementation(libs.androidx.coroutines.android)
+    implementation(libs.google.mobile.ads)
     ksp(libs.androidx.hilt.compiler)
     ksp(libs.androidx.hilt.work.compiler)
     testImplementation(libs.junit)
