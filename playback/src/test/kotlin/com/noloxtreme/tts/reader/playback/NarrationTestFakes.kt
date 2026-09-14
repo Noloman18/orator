@@ -166,7 +166,16 @@ internal class FakeContentRepository(
     ): DocumentPosition {
         val paragraph = paragraphsByIndex[position.paragraphIndex] ?: return position
         val starts = sentenceStarts(paragraph.text)
-        val previous = starts.lastOrNull { it < position.offsetInParagraph }
+        val currentStart = starts.lastOrNull { it <= position.offsetInParagraph }
+        val searchBefore = if (
+            currentStart != null &&
+            position.offsetInParagraph - currentStart <= PREVIOUS_SENTENCE_OPENING_TOLERANCE_CHARS
+        ) {
+            currentStart
+        } else {
+            position.offsetInParagraph
+        }
+        val previous = starts.lastOrNull { it < searchBefore }
         if (previous != null) return paragraph.positionAt(previous)
         val prior = paragraphsByIndex[position.paragraphIndex - 1]
             ?: return paragraph.positionAt(0)
@@ -196,6 +205,10 @@ internal class FakeContentRepository(
             start = iterator.next()
         }
         return starts.filter { it < text.length }.ifEmpty { listOf(0) }
+    }
+
+    private companion object {
+        const val PREVIOUS_SENTENCE_OPENING_TOLERANCE_CHARS = 24
     }
 }
 

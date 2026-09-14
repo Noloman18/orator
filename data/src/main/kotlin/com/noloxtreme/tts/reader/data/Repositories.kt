@@ -112,7 +112,19 @@ class RoomContentRepository @Inject constructor(
     ): DocumentPosition {
         val current = paragraph(id, position.paragraphIndex) ?: return position
         val starts = sentenceStarts(current.text)
-        val previous = starts.lastOrNull { it < position.offsetInParagraph }
+        // TTS reports a word boundary shortly after a sentence begins. Treat that
+        // brief opening window as the sentence start so Previous moves to the
+        // preceding sentence instead of making the user press it twice.
+        val currentStart = starts.lastOrNull { it <= position.offsetInParagraph }
+        val searchBefore = if (
+            currentStart != null &&
+            position.offsetInParagraph - currentStart <= PREVIOUS_SENTENCE_OPENING_TOLERANCE_CHARS
+        ) {
+            currentStart
+        } else {
+            position.offsetInParagraph
+        }
+        val previous = starts.lastOrNull { it < searchBefore }
         if (previous != null) return current.positionAt(previous)
         val priorParagraph = paragraph(id, position.paragraphIndex - 1)
             ?: return current.positionAt(0)
@@ -148,6 +160,11 @@ class RoomContentRepository @Inject constructor(
             }
         }.filter { it < text.length }
         return if (starts.isEmpty()) listOf(0) else starts
+    }
+
+    private companion object {
+        /** Covers the first spoken word and a following space for normal TTS rates. */
+        const val PREVIOUS_SENTENCE_OPENING_TOLERANCE_CHARS = 24
     }
 }
 
