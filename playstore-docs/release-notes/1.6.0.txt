@@ -1,0 +1,8 @@
+Version 1.6.0 (build 9)
+
+What's new in this release:
+
+- New Read Mode follows each word on screen without playing audio; choose reading speeds from 1× to 5×
+- Read Mode works with text documents and EPUB books, while preserving EPUB images and formatting
+- The reader now clearly shows the current narration or reading speed; the speed control changes pace and Next continues to skip ahead
+- Audio exports are more reliable for large documents and older devices, with clearer progress through speech creation, encoding, and saving

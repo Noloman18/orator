@@ -135,12 +135,29 @@ private val EpubBlock.runs: List<EpubRun>
     }
 
 /** The styled text of a text block, sliced to a page fragment when provided. */
-internal fun EpubBlock.slicedText(slice: PageItem.TextSlice?): AnnotatedString {
+internal fun EpubBlock.slicedText(
+    slice: PageItem.TextSlice?,
+    activeWord: PageTextRange? = null
+): AnnotatedString {
     val full = runs.toAnnotatedString(defaultItalic = this is EpubBlock.Quote)
-    return if (slice == null) {
-        full
-    } else {
-        full.subSequence(slice.charStart, slice.charEndExclusive)
+    val sliceStart = slice?.charStart ?: 0
+    val sliceEnd = slice?.charEndExclusive ?: full.length
+    val visible = full.subSequence(sliceStart, sliceEnd)
+    if (activeWord == null) return visible
+    val start = maxOf(activeWord.charStart, sliceStart)
+    val end = minOf(activeWord.charEndExclusive, sliceEnd)
+    if (end <= start) return visible
+    return buildAnnotatedString {
+        append(visible)
+        addStyle(
+            SpanStyle(
+                background = OratorDesignTokens.warmHighlight,
+                color = OratorDesignTokens.ink,
+                fontWeight = FontWeight.SemiBold
+            ),
+            start - sliceStart,
+            end - sliceStart
+        )
     }
 }
 
@@ -150,7 +167,7 @@ internal fun EpubBlock.slicedText(slice: PageItem.TextSlice?): AnnotatedString {
  * reader flips between them (tap the left/right edges, drag horizontally, or
  * use the transport's fast buttons). The page index is owned by the caller:
  * this pane reports page-turn requests and the measured page count through
- * [onNextPage], [onPreviousPage] and [onPageCountChange]. Narration controls
+ * [onNextPage], [onPreviousPage] and [onPageCountChange]. Read Mode controls
  * stay below this pane; only the middle content area is replaced.
  */
 @Composable
@@ -162,10 +179,10 @@ fun EpubReaderPane(
     chromeVisible: Boolean,
     pageIndex: Int,
     jumpTarget: PageTextAnchor?,
+    activeWord: PageTextRange? = null,
     onNextPage: () -> Unit,
     onPreviousPage: () -> Unit,
     onPageCountChange: (Int) -> Unit,
-    onPageAnchorChanged: (PageTextAnchor?) -> Unit,
     onJumpTargetResolved: (Int) -> Unit,
     onRetry: () -> Unit,
     onToggleChrome: () -> Unit,
@@ -188,10 +205,10 @@ fun EpubReaderPane(
                 chromeVisible = chromeVisible,
                 pageIndex = pageIndex,
                 jumpTarget = jumpTarget,
+                activeWord = activeWord,
                 onNextPage = onNextPage,
                 onPreviousPage = onPreviousPage,
                 onPageCountChange = onPageCountChange,
-                onPageAnchorChanged = onPageAnchorChanged,
                 onJumpTargetResolved = onJumpTargetResolved,
                 onToggleChrome = onToggleChrome,
                 loadImageBytes = loadImageBytes
@@ -208,10 +225,10 @@ private fun PagedChapterView(
     chromeVisible: Boolean,
     pageIndex: Int,
     jumpTarget: PageTextAnchor?,
+    activeWord: PageTextRange?,
     onNextPage: () -> Unit,
     onPreviousPage: () -> Unit,
     onPageCountChange: (Int) -> Unit,
-    onPageAnchorChanged: (PageTextAnchor?) -> Unit,
     onJumpTargetResolved: (Int) -> Unit,
     onToggleChrome: () -> Unit,
     loadImageBytes: suspend (String) -> ByteArray?
@@ -272,10 +289,6 @@ private fun PagedChapterView(
         LaunchedEffect(jumpPage) {
             if (jumpPage != null) onJumpTargetResolved(jumpPage)
         }
-        val anchor = pages.getOrNull(effectivePageIndex)?.let(::pageTextAnchor)
-        LaunchedEffect(anchor) {
-            onPageAnchorChanged(anchor)
-        }
         if (pages.isEmpty()) return@BoxWithConstraints
 
         // Gesture closures must always see the latest callbacks even though
@@ -333,6 +346,7 @@ private fun PagedChapterView(
                 PagedPageContent(
                     blocks = blocks,
                     page = pages[index],
+                    activeWord = activeWord,
                     fontSizeSp = fontSizeSp,
                     lineHeight = lineHeight,
                     styles = styles,
@@ -379,6 +393,7 @@ private fun PagedChapterView(
 private fun PagedPageContent(
     blocks: List<EpubBlock>,
     page: Page,
+    activeWord: PageTextRange?,
     fontSizeSp: Int,
     lineHeight: LineHeightPreference,
     styles: EpubTypeStyles,
@@ -393,6 +408,7 @@ private fun PagedPageContent(
             PageItemView(
                 block = blocks[item.blockIndex],
                 slice = item as? PageItem.TextSlice,
+                activeWord = activeWord?.takeIf { it.blockIndex == item.blockIndex },
                 fontSizeSp = fontSizeSp,
                 lineHeight = lineHeight,
                 styles = styles,
@@ -408,6 +424,7 @@ private fun PagedPageContent(
 private fun PageItemView(
     block: EpubBlock,
     slice: PageItem.TextSlice?,
+    activeWord: PageTextRange?,
     fontSizeSp: Int,
     lineHeight: LineHeightPreference,
     styles: EpubTypeStyles,
@@ -417,16 +434,16 @@ private fun PageItemView(
 ) {
     when (block) {
         is EpubBlock.Heading -> Text(
-            text = block.slicedText(slice),
+            text = block.slicedText(slice, activeWord),
             style = epubBlockStyle(block, fontSizeSp, lineHeight, styles),
             color = MaterialTheme.colorScheme.onSurface
         )
         is EpubBlock.Paragraph -> Text(
-            text = block.slicedText(slice),
+            text = block.slicedText(slice, activeWord),
             style = epubBlockStyle(block, fontSizeSp, lineHeight, styles)
         )
         is EpubBlock.Quote -> Text(
-            text = block.slicedText(slice),
+            text = block.slicedText(slice, activeWord),
             style = epubBlockStyle(block, fontSizeSp, lineHeight, styles),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
@@ -443,14 +460,14 @@ private fun PageItemView(
                         modifier = Modifier.width(ListMarkerWidth)
                     )
                     Text(
-                        text = block.slicedText(slice),
+                        text = block.slicedText(slice, activeWord),
                         style = epubBlockStyle(block, fontSizeSp, lineHeight, styles),
                         modifier = Modifier.weight(1f)
                     )
                 }
             } else {
                 Text(
-                    text = block.slicedText(slice),
+                    text = block.slicedText(slice, activeWord),
                     style = epubBlockStyle(block, fontSizeSp, lineHeight, styles),
                     modifier = Modifier
                         .fillMaxWidth()

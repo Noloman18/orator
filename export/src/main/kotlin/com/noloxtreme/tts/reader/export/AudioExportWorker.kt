@@ -27,14 +27,16 @@ import kotlinx.coroutines.flow.first
  *
  * 1. reads the book text from Room (no WorkManager input-size limits),
  * 2. synthesizes each bounded chunk to a WAV in cache via [FileSynthesizer],
- * 3. concatenates/encodes all WAVs with [M4aAssembler] (Media3 Transformer),
+ * 3. streams compatible WAV chunks into one source WAV, then encodes it with
+ *    [M4aAssembler] (Media3 Transformer),
  * 4. publishes the result to Music/Orator via [MediaStoreSaver],
  * 5. notifies completion or failure.
  *
  * Runs as a foreground service (mediaProcessing on Android 15+, dataSync below)
  * so the OS does not reap it while the user leaves the app or the screen is off.
- * A per-segment state file gives cheap resume after process death or reboot:
- * completed WAVs are skipped on the next run. User cancellation cleans up.
+ * A per-segment state file gives cheap resume after process death or reboot.
+ * Once the source WAV is complete, a later encoding retry does not need to
+ * initialize TTS or synthesize the document again. User cancellation cleans up.
  *
  * Every failure path carries the underlying exception (class name and message)
  * in the notification and result data, and the full stack trace is logged under
@@ -87,6 +89,7 @@ class AudioExportWorker @AssistedInject constructor(
         val workDir = File(applicationContext.cacheDir, "audio-export/${documentId.value}")
         val segmentsDir = File(workDir, "segments").apply { mkdirs() }
         val stateFile = File(workDir, "next-segment.txt")
+        val mergedWav = File(workDir, "speech.wav")
         val settings = settingsRepository.observeSettings().first()
         val configuration = SpeechConfiguration(
             languageTag = document.languageTag,
@@ -95,57 +98,116 @@ class AudioExportWorker @AssistedInject constructor(
             pitch = settings.speechPitch
         )
 
-        updateProgress(0, document.title, documentId.value, ExportStage.SYNTHESIZING)
-        when (synthesizer.initialize(configuration)) {
-            SpeechInitialization.Ready -> Unit
-            SpeechInitialization.EngineUnavailable -> return failure(ExportError.TTS_UNAVAILABLE)
-            SpeechInitialization.LanguageUnavailable -> {
-                return failure(ExportError.TTS_LANGUAGE_MISSING)
-            }
-        }
-
         try {
-            var next = stateFile.readLongOr(0L).coerceAtMost(chunks.size.toLong())
-            while (next < chunks.size) {
-                checkNotStopped(workDir)
-                val index = next.toInt()
-                val wav = File(segmentsDir, "%06d.wav".format(index))
-                if (!wav.exists() || wav.length() == 0L) {
-                    val result = synthesizeWithRetry(
-                        chunks[index].text,
-                        "export-$index",
-                        wav,
-                        configuration
-                    )
-                    if (result != SynthesisResult.Success) {
-                        val detail = (result as? SynthesisResult.Failure)
-                            ?.let { "TTS error code ${it.reason}" }
-                        return failure(ExportError.SYNTHESIS_FAILED, detail)
+            if (!WavConcatenator.isSupportedWav(mergedWav)) {
+                // Never pass a large list of sentence-sized WAVs to Media3. On
+                // older devices that creates a large AssetLoader sequence and
+                // can fail before encoding begins. A streamed source WAV keeps
+                // the Transformer input constant at one item regardless of book
+                // length.
+                mergedWav.delete()
+                updateProgress(0, document.title, documentId.value, ExportStage.SYNTHESIZING)
+                when (synthesizer.initialize(configuration)) {
+                    SpeechInitialization.Ready -> Unit
+                    SpeechInitialization.EngineUnavailable -> {
+                        return failure(ExportError.TTS_UNAVAILABLE)
+                    }
+                    SpeechInitialization.LanguageUnavailable -> {
+                        return failure(ExportError.TTS_LANGUAGE_MISSING)
                     }
                 }
-                next = (index + 1).toLong()
-                stateFile.writeLong(next)
-                val percent = (next * SYNTHESIS_PROGRESS_WEIGHT / chunks.size)
-                    .toInt()
-                    .coerceIn(0, SYNTHESIS_PROGRESS_WEIGHT)
-                updateProgress(percent, document.title, documentId.value, ExportStage.SYNTHESIZING)
+
+                var next = stateFile.readLongOr(0L).coerceAtMost(chunks.size.toLong())
+                // The state file may have been written just before an interrupted
+                // file write. Re-synthesize from the first invalid segment instead
+                // of presenting a malformed WAV to the encoder.
+                val firstInvalid = (0 until next.toInt()).firstOrNull { index ->
+                    !WavConcatenator.isSupportedWav(File(segmentsDir, "%06d.wav".format(index)))
+                }
+                if (firstInvalid != null) {
+                    next = firstInvalid.toLong()
+                    stateFile.writeLong(next)
+                }
+                while (next < chunks.size) {
+                    checkNotStopped(workDir)
+                    val index = next.toInt()
+                    val wav = File(segmentsDir, "%06d.wav".format(index))
+                    if (!WavConcatenator.isSupportedWav(wav)) {
+                        wav.delete()
+                        val result = synthesizeWithRetry(
+                            chunks[index].text,
+                            "export-$index",
+                            wav,
+                            configuration
+                        )
+                        if (result != SynthesisResult.Success) {
+                            val detail = (result as? SynthesisResult.Failure)
+                                ?.let { "TTS error code ${it.reason}" }
+                            return failure(ExportError.SYNTHESIS_FAILED, detail)
+                        }
+                        val validationError = WavConcatenator.validationError(wav)
+                        if (validationError != null) {
+                            wav.delete()
+                            return failure(
+                                ExportError.SYNTHESIS_FAILED,
+                                "Speech engine produced an invalid WAV segment: $validationError"
+                            )
+                        }
+                    }
+                    next = (index + 1).toLong()
+                    stateFile.writeLong(next)
+                    val percent = (next * SYNTHESIS_PROGRESS_WEIGHT / chunks.size)
+                        .toInt()
+                        .coerceIn(0, SYNTHESIS_PROGRESS_WEIGHT)
+                    updateProgress(percent, document.title, documentId.value, ExportStage.SYNTHESIZING)
+                }
+
+                val wavFiles = (0 until chunks.size).map { index ->
+                    File(segmentsDir, "%06d.wav".format(index))
+                }
+                updateProgress(
+                    SYNTHESIS_PROGRESS_WEIGHT,
+                    document.title,
+                    documentId.value,
+                    ExportStage.ENCODING
+                )
+                try {
+                    WavConcatenator.concatenate(wavFiles, mergedWav) { mergePercent ->
+                        checkNotStopped(workDir)
+                        val overallPercent = SYNTHESIS_PROGRESS_WEIGHT +
+                            (mergePercent * MERGING_PROGRESS_WEIGHT / 100)
+                        updateProgress(
+                            overallPercent.coerceAtMost(AAC_ENCODING_START_PERCENT),
+                            document.title,
+                            documentId.value,
+                            ExportStage.ENCODING
+                        )
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Throwable) {
+                    return failure(ExportError.ENCODING_FAILED, describe(error))
+                }
+                // The merged WAV is written atomically. Keep it for an encoding
+                // retry, while dropping the many no-longer-needed chunk files.
+                segmentsDir.deleteRecursively()
+            } else {
+                // An earlier run completed synthesis but failed while encoding or
+                // saving. Continue directly from the verified source WAV.
+                updateProgress(
+                    AAC_ENCODING_START_PERCENT,
+                    document.title,
+                    documentId.value,
+                    ExportStage.ENCODING
+                )
             }
 
-            val wavFiles = (0 until chunks.size).map { index ->
-                File(segmentsDir, "%06d.wav".format(index))
-            }
             val output = File(workDir, "export.m4a")
             // A previous encoding attempt may have left a partial container. It
-            // cannot be resumed safely, while the synthesized WAV segments can.
+            // cannot be resumed safely, while the verified source WAV can.
             output.delete()
-            updateProgress(
-                SYNTHESIS_PROGRESS_WEIGHT,
-                document.title,
-                documentId.value,
-                ExportStage.ENCODING
-            )
-            val assembleResult = assembler.assemble(wavFiles, output) { encodingPercent ->
-                val overallPercent = SYNTHESIS_PROGRESS_WEIGHT +
+            val assembleResult = assembler.assemble(listOf(mergedWav), output) { encodingPercent ->
+                val overallPercent = AAC_ENCODING_START_PERCENT +
                     (encodingPercent * ENCODING_PROGRESS_WEIGHT / 100)
                 updateProgress(
                     overallPercent.coerceAtMost(MAX_IN_PROGRESS_PERCENT),
@@ -241,9 +303,15 @@ class AudioExportWorker @AssistedInject constructor(
     }
 
     private fun describe(error: Throwable): String {
-        val message = error.message?.trim().orEmpty()
-            .ifBlank { error.javaClass.simpleName }
-        return "${error.javaClass.simpleName}: $message".take(MAX_DETAIL_CHARS)
+        return generateSequence(error) { it.cause }
+            .map { cause ->
+                val message = cause.message?.trim().orEmpty()
+                    .ifBlank { cause.javaClass.simpleName }
+                "${cause.javaClass.simpleName}: $message"
+            }
+            .distinct()
+            .joinToString(" ← ")
+            .take(MAX_DETAIL_CHARS)
     }
 
     private fun File.readLongOr(default: Long): Long =
@@ -257,7 +325,9 @@ class AudioExportWorker @AssistedInject constructor(
         const val TAG = "OratorExport"
         const val MAX_DETAIL_CHARS = 300
         const val SYNTHESIS_PROGRESS_WEIGHT = 85
-        const val ENCODING_PROGRESS_WEIGHT = 14
+        const val MERGING_PROGRESS_WEIGHT = 7
+        const val AAC_ENCODING_START_PERCENT = SYNTHESIS_PROGRESS_WEIGHT + MERGING_PROGRESS_WEIGHT
+        const val ENCODING_PROGRESS_WEIGHT = 7
         const val MAX_IN_PROGRESS_PERCENT = 99
     }
 }

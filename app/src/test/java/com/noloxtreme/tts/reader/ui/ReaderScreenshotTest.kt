@@ -194,7 +194,6 @@ class ReaderScreenshotTest {
                     onNextPage = {},
                     onPreviousPage = {},
                     onPageCountChange = {},
-                    onPageAnchorChanged = {},
                     onJumpTargetResolved = {},
                     onRetry = {},
                     onToggleChrome = {},

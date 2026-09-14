@@ -9,37 +9,33 @@ class ReaderTransportTest {
     fun narrationTransportForwardsToSentenceAndSpeedActions() {
         val calls = mutableListOf<String>()
         val transport = NarrationTransport(
-            rewindAction = { calls += "rewind" },
             previousSentenceAction = { calls += "previous" },
             nextSentenceAction = { calls += "next" },
             increaseSpeedAction = { calls += "increaseSpeed" }
         )
 
-        transport.rewind()
         transport.previous()
         transport.next()
-        transport.fastForward()
+        transport.increaseSpeed()
 
-        assertEquals(listOf("rewind", "previous", "next", "increaseSpeed"), calls)
+        assertEquals(listOf("previous", "next", "increaseSpeed"), calls)
     }
 
     @Test
-    fun chapterTransportMapsSkipButtonsToChaptersAndFastButtonsToPages() {
+    fun visualReadingTransportForwardsToWordAndPaceActions() {
         val calls = mutableListOf<String>()
-        val transport = ChapterTransport(
-            previousChapter = { calls += "previousChapter" },
-            nextChapter = { calls += "nextChapter" },
-            previousPage = { calls += "previousPage" },
-            nextPage = { calls += "nextPage" }
+        val transport = VisualReadingTransport(
+            previousWordAction = { calls += "previousWord" },
+            nextWordAction = { calls += "nextWord" },
+            increasePaceAction = { calls += "increasePace" }
         )
 
-        transport.rewind()
         transport.previous()
         transport.next()
-        transport.fastForward()
+        transport.increaseSpeed()
 
         assertEquals(
-            listOf("previousPage", "previousChapter", "nextChapter", "nextPage"),
+            listOf("previousWord", "nextWord", "increasePace"),
             calls
         )
     }

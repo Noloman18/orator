@@ -35,8 +35,6 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.FastForward
-import androidx.compose.material.icons.outlined.FastRewind
 import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.PlayArrow
@@ -95,6 +93,8 @@ import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -522,11 +522,14 @@ private fun ReaderScreen(
     val settings by viewModel.settings.collectAsState()
     val narration by viewModel.narration.collectAsState()
     val sectionTitle by viewModel.sectionTitle.collectAsState()
+    val inReadMode by viewModel.readMode.collectAsState()
+    val visualReading by viewModel.visualReading.collectAsState()
     val epubReading by viewModel.epubReading.collectAsState()
     val transport by viewModel.transport.collectAsState()
     val readerPageIndex by viewModel.readerPageIndex.collectAsState()
     val readerJumpTarget by viewModel.readerJumpTarget.collectAsState()
-    val inReadMode = epubReading != null
+    val readerActiveWord by viewModel.readerActiveWord.collectAsState()
+    val isEpubReadMode = inReadMode && document?.mimeType == EPUB_MIME_TYPE
     var tocSheetVisible by remember(documentId) { mutableStateOf(false) }
     val lazyParagraphs = viewModel.paragraphs.collectAsLazyPagingItems()
     val listState = rememberLazyListState()
@@ -535,11 +538,18 @@ private fun ReaderScreen(
         ?.takeIf { it.documentId == documentId }
         ?.activeRange
     val currentParagraphIndex = narrationPosition?.paragraphIndex ?: -1
-    val currentAbsoluteOffset = narrationPosition?.absoluteOffset
-        ?: progress?.position?.absoluteOffset
-        ?: 0L
+    val currentAbsoluteOffset = if (inReadMode) {
+        visualReading.activeWord?.position?.absoluteOffset
+            ?: progress?.position?.absoluteOffset
+            ?: 0L
+    } else {
+        narrationPosition?.absoluteOffset
+            ?: progress?.position?.absoluteOffset
+            ?: 0L
+    }
     val totalCharacterCount = document?.totalCharacterCount ?: 0L
-    val playing = narration is NarrationState.Playing || narration is NarrationState.Preparing
+    val narrationPlaying = narration is NarrationState.Playing || narration is NarrationState.Preparing
+    val playing = if (inReadMode) visualReading.isPlaying else narrationPlaying
     val playbackError = narration as? NarrationState.Error
     var followEnabled by remember { mutableStateOf(settings.followSpokenText) }
     var programmaticScroll by remember { mutableStateOf(false) }
@@ -650,6 +660,24 @@ private fun ReaderScreen(
             }
         }
     }
+    LaunchedEffect(
+        visualReading.activeWord,
+        inReadMode,
+        isEpubReadMode,
+        lazyParagraphs.itemCount,
+        sectionTitle
+    ) {
+        val activeWord = visualReading.activeWord ?: return@LaunchedEffect
+        if (inReadMode && !isEpubReadMode && activeWord.range.paragraphIndex < lazyParagraphs.itemCount) {
+            val itemIndex = activeWord.range.paragraphIndex + if (sectionTitle != null) 1 else 0
+            programmaticScroll = true
+            try {
+                listState.animateScrollToItem(itemIndex)
+            } finally {
+                programmaticScroll = false
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -662,18 +690,18 @@ private fun ReaderScreen(
                         IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = stringResource(R.string.back)) }
                     },
                     actions = {
-                        if (document?.mimeType == EPUB_MIME_TYPE) {
-                            if (inReadMode) {
+                        if (inReadMode) {
+                            if (document?.mimeType == EPUB_MIME_TYPE) {
                                 IconButton(onClick = { tocSheetVisible = true }) {
                                     Icon(Icons.Outlined.Toc, contentDescription = stringResource(R.string.table_of_contents))
                                 }
-                                IconButton(onClick = viewModel::exitReadMode) {
-                                    Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.close_read_mode))
-                                }
-                            } else {
-                                IconButton(onClick = viewModel::enterReadMode) {
-                                    Icon(Icons.Outlined.MenuBook, contentDescription = stringResource(R.string.open_read_mode))
-                                }
+                            }
+                            IconButton(onClick = viewModel::exitReadMode) {
+                                Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.close_read_mode))
+                            }
+                        } else {
+                            IconButton(onClick = viewModel::enterReadMode) {
+                                Icon(Icons.Outlined.MenuBook, contentDescription = stringResource(R.string.open_read_mode))
                             }
                         }
                         ExportAndSettingsMenu(
@@ -695,16 +723,29 @@ private fun ReaderScreen(
                     playing = playing,
                     transport = transport,
                     reading = inReadMode,
+                    speechRate = settings.speechRate,
+                    visualReadingPace = visualReading.pace,
+                    visualReadingCompleted = visualReading.completed,
                     onPlay = {
-                        if (!playing) {
+                        if (inReadMode) {
+                            viewModel.toggleVisualReading()
+                        } else {
+                            if (!playing) {
                             val serviceIntent = android.content.Intent(context, NarrationService::class.java)
                                 .putExtra(NarrationService.EXTRA_DOCUMENT_ID, documentId.value)
                             // Start while the reader is visible. Media3 promotes the service to
                             // foreground in sync with playback, avoiding the platform's five-second
                             // foreground-service deadline before narration has entered Playing.
                             context.startService(serviceIntent)
+                            }
+                            if (narration is NarrationState.Completed) {
+                                viewModel.restart()
+                            } else if (playing) {
+                                viewModel.pause()
+                            } else {
+                                viewModel.play()
+                            }
                         }
-                        if (narration is NarrationState.Completed) viewModel.restart() else if (playing) viewModel.pause() else if (inReadMode) viewModel.playFromCurrentPage() else viewModel.play()
                     }
                 )
             }
@@ -779,23 +820,29 @@ private fun ReaderScreen(
                                             ).roundToLong()
                                             isSeeking = false
                                             if (settings.followSpokenText) followEnabled = true
-                                            viewModel.seekToAbsoluteOffset(targetOffset)
+                                            if (inReadMode) {
+                                                viewModel.seekVisualToAbsoluteOffset(targetOffset)
+                                            } else {
+                                                viewModel.seekToAbsoluteOffset(targetOffset)
+                                            }
                                         },
                                         enabled = currentDocument.totalCharacterCount > 0L,
                                         modifier = Modifier.fillMaxWidth()
                                     )
                                 }
                             }
-                            playbackError?.let { error ->
-                                PlaybackErrorCard(
-                                    error = error.code,
-                                    onRetry = viewModel::play,
-                                    onOpenTtsSettings = {
-                                        context.startActivity(android.content.Intent("android.settings.TTS_SETTINGS"))
-                                    }
-                                )
+                            if (!inReadMode) {
+                                playbackError?.let { error ->
+                                    PlaybackErrorCard(
+                                        error = error.code,
+                                        onRetry = viewModel::play,
+                                        onOpenTtsSettings = {
+                                            context.startActivity(android.content.Intent("android.settings.TTS_SETTINGS"))
+                                        }
+                                    )
+                                }
                             }
-                            if (inReadMode) {
+                            if (isEpubReadMode) {
                                 val readingState = epubReading
                                 if (readingState != null) {
                                     EpubReaderPane(
@@ -806,47 +853,61 @@ private fun ReaderScreen(
                                         chromeVisible = chromeVisible,
                                         pageIndex = readerPageIndex,
                                         jumpTarget = readerJumpTarget,
+                                        activeWord = readerActiveWord,
                                         onNextPage = viewModel::nextReaderPage,
                                         onPreviousPage = viewModel::previousReaderPage,
                                         onPageCountChange = viewModel::setReaderPageCount,
-                                        onPageAnchorChanged = viewModel::setPageAnchor,
                                         onJumpTargetResolved = viewModel::resolveReaderJump,
                                         onRetry = viewModel::retryCurrentSpine,
                                         onToggleChrome = { chromeVisible = !chromeVisible },
                                         loadImageBytes = viewModel::imageBytes,
                                         modifier = Modifier.weight(1f)
                                     )
+                                } else {
+                                    Box(
+                                        modifier = Modifier.fillMaxWidth().weight(1f),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        CircularProgressIndicator()
+                                    }
                                 }
                             } else {
-                            LazyColumn(
-                                state = listState,
-                                modifier = Modifier.fillMaxWidth().weight(1f),
-                                contentPadding = PaddingValues(start = 22.dp, end = 22.dp, top = 12.dp, bottom = 26.dp),
-                                verticalArrangement = Arrangement.spacedBy(18.dp)
-                            ) {
-                                if (sectionTitle != null) {
-                                    item {
-                                        Text(
-                                            text = sectionTitle!!,
-                                            style = MaterialTheme.typography.labelLarge,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
+                                LazyColumn(
+                                    state = listState,
+                                    modifier = Modifier.fillMaxWidth().weight(1f),
+                                    contentPadding = PaddingValues(start = 22.dp, end = 22.dp, top = 12.dp, bottom = 26.dp),
+                                    verticalArrangement = Arrangement.spacedBy(18.dp)
+                                ) {
+                                    if (sectionTitle != null) {
+                                        item {
+                                            Text(
+                                                text = sectionTitle!!,
+                                                style = MaterialTheme.typography.labelLarge,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    }
+                                    items(lazyParagraphs.itemCount, key = { index -> "paragraph-" + index }) { index ->
+                                        val paragraph = lazyParagraphs[index]
+                                        if (paragraph == null) {
+                                            Spacer(Modifier.fillMaxWidth().height(90.dp))
+                                        } else {
+                                            val activeRange = if (inReadMode) {
+                                                visualReading.activeWord?.range
+                                            } else {
+                                                currentRange
+                                            }
+                                            ParagraphText(
+                                                text = paragraph.text,
+                                                activeRange = activeRange?.takeIf {
+                                                    it.paragraphIndex == paragraph.paragraphIndex
+                                                },
+                                                fontSizeSp = settings.readerFontSizeSp,
+                                                lineHeight = settings.lineHeight
+                                            )
+                                        }
                                     }
                                 }
-                                items(lazyParagraphs.itemCount, key = { index -> "paragraph-" + index }) { index ->
-                                    val paragraph = lazyParagraphs[index]
-                                    if (paragraph == null) {
-                                        Spacer(Modifier.fillMaxWidth().height(90.dp))
-                                    } else {
-                                        ParagraphText(
-                                            text = paragraph.text,
-                                            activeRange = currentRange?.takeIf { it.paragraphIndex == paragraph.paragraphIndex },
-                                            fontSizeSp = settings.readerFontSizeSp,
-                                            lineHeight = settings.lineHeight
-                                        )
-                                    }
-                                 }
-                             }
                              }
                         }
                         if (!followEnabled && currentParagraphIndex >= 0 && !inReadMode) {
@@ -933,8 +994,17 @@ private fun ReaderControls(
     playing: Boolean,
     transport: ReaderTransport,
     reading: Boolean,
+    speechRate: Float,
+    visualReadingPace: Float,
+    visualReadingCompleted: Boolean,
     onPlay: () -> Unit
 ) {
+    val speedLabel = narrationSpeedLabel(if (reading) visualReadingPace else speechRate)
+    val speedButtonDescription = stringResource(
+        if (reading) R.string.increase_reading_pace_at_rate else R.string.increase_speech_speed_at_rate,
+        speedLabel
+    )
+    val completed = if (reading) visualReadingCompleted else narration is NarrationState.Completed
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -948,31 +1018,26 @@ private fun ReaderControls(
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = transport::rewind) {
-                Icon(
-                    Icons.Outlined.FastRewind,
-                    contentDescription = stringResource(
-                        if (reading) R.string.previous_page else R.string.rewind
-                    )
-                )
-            }
             IconButton(onClick = transport::previous) {
                 Icon(
                     Icons.Outlined.SkipPrevious,
                     contentDescription = stringResource(
-                        if (reading) R.string.previous_chapter else R.string.previous_sentence
+                        when {
+                            !reading -> R.string.previous_sentence
+                            else -> R.string.previous_word
+                        }
                     )
                 )
             }
             IconButton(onClick = onPlay, modifier = Modifier.size(56.dp)) {
                 Icon(
                     imageVector = when {
-                        narration is NarrationState.Completed -> Icons.Outlined.Replay
+                        completed -> Icons.Outlined.Replay
                         playing -> Icons.Outlined.Pause
                         else -> Icons.Outlined.PlayArrow
                     },
                     contentDescription = when {
-                        narration is NarrationState.Completed -> stringResource(R.string.replay)
+                        completed -> stringResource(R.string.replay)
                         playing -> stringResource(R.string.pause)
                         else -> stringResource(R.string.play)
                     },
@@ -984,19 +1049,36 @@ private fun ReaderControls(
                 Icon(
                     Icons.Outlined.SkipNext,
                     contentDescription = stringResource(
-                        if (reading) R.string.next_chapter else R.string.next_sentence
+                        when {
+                            !reading -> R.string.next_sentence
+                            else -> R.string.next_word
+                        }
                     )
                 )
             }
-            IconButton(onClick = transport::fastForward) {
-                Icon(
-                    Icons.Outlined.FastForward,
-                    contentDescription = stringResource(
-                        if (reading) R.string.next_page else R.string.increase_speech_speed
-                    )
+            IconButton(
+                onClick = transport::increaseSpeed,
+                modifier = Modifier.semantics {
+                    contentDescription = speedButtonDescription
+                }
+            ) {
+                Text(
+                    text = speedLabel,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary
                 )
             }
         }
+    }
+}
+
+private fun narrationSpeedLabel(rate: Float): String {
+    val rounded = (rate * 100).roundToInt() / 100f
+    return if (rounded == rounded.toInt().toFloat()) {
+        "${rounded.toInt()}×"
+    } else {
+        "${rounded}×"
     }
 }
 

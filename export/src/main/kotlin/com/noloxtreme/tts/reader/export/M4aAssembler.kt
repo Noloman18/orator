@@ -23,14 +23,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Concatenates the per-utterance WAV files into one AAC (.m4a) file using
- * Media3 Transformer — the maintained, platform-level replacement for FFmpeg.
- * The output is AAC in an M4A container. Sample rate and channel count follow
- * the engine's WAV format (all chunks in a run share the same engine and
- * format). The encoder settings are intentionally left to the device: older
- * Samsung codecs can reject an otherwise valid forced AAC profile during
- * configuration, whereas Media3's default factory negotiates a supported AAC
- * configuration and falls back when needed.
+ * Encodes a normalized WAV source into an AAC (.m4a) file using Media3
+ * Transformer — the maintained, platform-level replacement for FFmpeg. The
+ * output is AAC in an M4A container. The encoder settings are intentionally
+ * left to the device: older Samsung codecs can reject an otherwise valid
+ * forced AAC profile during configuration, whereas Media3's default factory
+ * negotiates a supported AAC configuration and falls back when needed.
  *
  * Transformer falls back to the main looper when built on a thread without
  * one, and then requires every call on that thread — so all interaction here

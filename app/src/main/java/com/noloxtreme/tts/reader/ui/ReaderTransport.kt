@@ -1,50 +1,36 @@
 package com.noloxtreme.tts.reader.ui
 
 /**
- * Strategy for the reader transport buttons (rewind, previous, next,
- * fast-forward). The active strategy is selected by [ReaderViewModel] from the
- * current mode: [NarrationTransport] while listening to the book, and
- * [ChapterTransport] while the visual read mode is open. Swapping the strategy
- * keeps the transport UI unchanged while its behavior follows the mode, so the
- * buttons always act on what the user is currently doing.
+ * Strategy for the reader transport buttons. The active strategy is selected
+ * by [ReaderViewModel] from the current mode: [NarrationTransport] while
+ * listening to the book, and [VisualReadingTransport] in silent Read Mode.
  */
 interface ReaderTransport {
-    fun rewind()
     fun previous()
     fun next()
-    fun fastForward()
+    fun increaseSpeed()
 }
 
-/** Audio mode: skip buttons navigate sentences and fast-forward increases speech speed. */
+/** Audio mode: skip buttons navigate sentences and the rate button speeds up TTS. */
 class NarrationTransport(
-    private val rewindAction: () -> Unit,
     private val previousSentenceAction: () -> Unit,
     private val nextSentenceAction: () -> Unit,
     private val increaseSpeedAction: () -> Unit
 ) : ReaderTransport {
-    override fun rewind() = rewindAction()
     override fun previous() = previousSentenceAction()
     override fun next() = nextSentenceAction()
-    override fun fastForward() = increaseSpeedAction()
+    override fun increaseSpeed() = increaseSpeedAction()
 }
 
-/**
- * Reading mode: the skip buttons move between chapters (spine items) while
- * the fast buttons turn pages inside the current chapter, mirroring the
- * swipe gesture. This keeps the fast buttons distinct from the skip buttons
- * and keeps the visual reader's page-turn behavior separate from narration
- * mode, where fast-forward changes speech speed.
- */
-class ChapterTransport(
-    private val previousChapter: () -> Unit,
-    private val nextChapter: () -> Unit,
-    private val previousPage: () -> Unit,
-    private val nextPage: () -> Unit
+/** Read Mode: move the visual word pointer or increase its silent reading pace. */
+class VisualReadingTransport(
+    private val previousWordAction: () -> Unit,
+    private val nextWordAction: () -> Unit,
+    private val increasePaceAction: () -> Unit
 ) : ReaderTransport {
-    override fun rewind() = previousPage()
-    override fun previous() = previousChapter()
-    override fun next() = nextChapter()
-    override fun fastForward() = nextPage()
+    override fun previous() = previousWordAction()
+    override fun next() = nextWordAction()
+    override fun increaseSpeed() = increasePaceAction()
 }
 
 /** The result of requesting a page turn in read mode. */

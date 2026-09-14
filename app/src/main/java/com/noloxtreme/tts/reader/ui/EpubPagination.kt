@@ -63,6 +63,19 @@ data class Page(val items: List<PageItem>)
 /** The first narratable position on a page: a text block and offset within it. */
 data class PageTextAnchor(val blockIndex: Int, val charStart: Int)
 
+/** A word range mapped into a styled EPUB block's raw inline text. */
+data class PageTextRange(
+    val blockIndex: Int,
+    val charStart: Int,
+    val charEndExclusive: Int
+) {
+    init {
+        require(blockIndex >= 0)
+        require(charStart >= 0)
+        require(charEndExclusive > charStart)
+    }
+}
+
 /** The first text slice on [page], or null when the page carries no text. */
 fun pageTextAnchor(page: Page): PageTextAnchor? =
     (page.items.firstOrNull { it is PageItem.TextSlice } as? PageItem.TextSlice)

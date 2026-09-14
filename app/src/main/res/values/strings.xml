@@ -53,6 +53,10 @@
     <string name="next_sentence">Next sentence</string>
     <string name="rewind">Rewind five sentences</string>
     <string name="increase_speech_speed">Increase speech speed</string>
+    <string name="increase_speech_speed_at_rate">Increase speech speed. Current speed: %1$s</string>
+    <string name="increase_reading_pace_at_rate">Increase reading pace. Current pace: %1$s</string>
+    <string name="previous_word">Previous word</string>
+    <string name="next_word">Next word</string>
     <string name="remove_book_action">Remove book</string>
     <string name="imported_book">Imported book</string>
     <string name="theme_light">Light</string>
