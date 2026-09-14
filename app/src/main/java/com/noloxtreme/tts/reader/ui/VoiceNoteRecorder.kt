@@ -23,6 +23,7 @@ class VoiceNoteRecorder(private val context: Context) {
         get() = recorder != null
 
     fun start(): Boolean {
+        if (recorder != null) return false
         val directory = File(context.cacheDir, "voice-note-drafts")
         if (!directory.exists() && !directory.mkdirs()) return false
         val file = File(directory, "${UUID.randomUUID()}.m4a")

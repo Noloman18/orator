@@ -1085,11 +1085,13 @@ private fun NoteComposerDialog(
     var text by rememberSaveable { mutableStateOf("") }
     var voiceRecording by remember { mutableStateOf<VoiceNoteRecording?>(null) }
     var recordingError by remember { mutableStateOf<String?>(null) }
+    var isRecording by remember(context) { mutableStateOf(false) }
 
     fun startRecording() {
         voiceRecording?.file?.delete()
         voiceRecording = null
-        recordingError = if (recorder.start()) null else context.getString(R.string.note_recording_failed)
+        isRecording = recorder.start()
+        recordingError = if (isRecording) null else context.getString(R.string.note_recording_failed)
     }
 
     val microphonePermission = rememberLauncherForActivityResult(
@@ -1127,7 +1129,7 @@ private fun NoteComposerDialog(
                     minLines = 3,
                     modifier = Modifier.fillMaxWidth()
                 )
-                if (recorder.isRecording) {
+                if (isRecording) {
                     Text(
                         stringResource(R.string.note_recording),
                         color = MaterialTheme.colorScheme.error,
@@ -1135,6 +1137,7 @@ private fun NoteComposerDialog(
                     )
                     OutlinedButton(onClick = {
                         voiceRecording = recorder.stop()
+                        isRecording = false
                         if (voiceRecording == null) {
                             recordingError = context.getString(R.string.note_recording_failed)
                         }
@@ -1185,7 +1188,7 @@ private fun NoteComposerDialog(
                     handedOff.value = true
                     onSave(text, voiceRecording)
                 },
-                enabled = !recorder.isRecording && (text.isNotBlank() || voiceRecording != null)
+                enabled = !isRecording && (text.isNotBlank() || voiceRecording != null)
             ) { Text(stringResource(R.string.save_note)) }
         },
         dismissButton = {
