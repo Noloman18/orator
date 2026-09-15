@@ -3,8 +3,10 @@
     <string name="export_channel_progress">Audio export progress</string>
     <string name="export_channel_completion">Audio export finished</string>
     <string name="export_notification_title">Exporting %1$s</string>
+    <string name="export_notification_preparing_title">audio export</string>
     <string name="export_notification_synthesizing">Creating speech — %1$d%%</string>
     <string name="export_notification_encoding">Encoding audio — %1$d%%</string>
+    <string name="export_notification_combining">Combining audio — %1$d%%</string>
     <string name="export_notification_saving">Saving audio — %1$d%%</string>
     <string name="export_cancel_action">Cancel</string>
     <string name="export_done_title">Export complete</string>
@@ -17,5 +19,6 @@
     <string name="export_error_synthesis_failed">Speech synthesis failed.</string>
     <string name="export_error_encoding_failed">Audio encoding failed.</string>
     <string name="export_error_storage_failed">The file could not be saved to storage.</string>
+    <string name="export_error_foreground_start_not_allowed">Audio export could not start. Keep Orator open and try again.</string>
     <string name="export_error_unknown">Something went wrong.</string>
 </resources>

@@ -7,9 +7,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Streams compatible PCM WAV files into one WAV file without loading audio data
- * into memory. Transformer receives that single asset, avoiding a large
- * sequence of per-sentence asset loaders for long documents.
+ * Streams TTS WAV files into one canonical 22.05 kHz mono 16-bit PCM WAV
+ * without loading audio data into memory. Android TTS engines are allowed to
+ * produce different PCM formats, sample rates and channel counts; every batch
+ * must be identical so its encoded AAC samples can be remuxed into one file.
  */
 internal object WavConcatenator {
 
@@ -20,11 +21,8 @@ internal object WavConcatenator {
     ) = withContext(Dispatchers.IO) {
         require(wavFiles.isNotEmpty()) { "No WAV segments were supplied" }
         val inputs = wavFiles.map(::inspect)
-        val format = inputs.first().format
-        inputs.drop(1).forEach { input ->
-            require(input.format == format) { "Speech segments use different WAV formats" }
-        }
-        val dataSize = inputs.sumOf { it.dataSize }
+        val outputFormat = WavFormat.exportPcm16()
+        val dataSize = inputs.sumOf { it.normalizedFrameCount * outputFormat.blockAlign }
         require(dataSize <= MAX_WAV_DATA_SIZE) { "The synthesized audio is too long to package" }
 
         outputFile.parentFile?.mkdirs()
@@ -39,12 +37,12 @@ internal object WavConcatenator {
                 inputs.forEachIndexed { index, input ->
                     RandomAccessFile(input.file, "r").use { source ->
                         source.seek(input.dataOffset)
-                        copy(source, output, input.dataSize)
+                        copy(source, output, input, outputFormat)
                     }
-                    writtenDataSize += input.dataSize
+                    writtenDataSize += input.normalizedFrameCount * outputFormat.blockAlign
                     onProgress(((index + 1) * 100 / inputs.size).coerceIn(0, 100))
                 }
-                writeHeader(output, format, writtenDataSize)
+                writeHeader(output, outputFormat, writtenDataSize)
             }
             replace(outputFile, temporary)
             completed = true
@@ -54,6 +52,12 @@ internal object WavConcatenator {
     }
 
     fun isSupportedWav(file: File): Boolean = validationError(file) == null
+
+    /** Size of this source after normalization to Media3-compatible 16-bit PCM. */
+    fun normalizedPcm16DataSize(file: File): Long {
+        val input = inspect(file)
+        return input.normalizedFrameCount * WavFormat.exportPcm16().blockAlign
+    }
 
     /** Returns a user-safe reason when [file] cannot be used as a source WAV. */
     fun validationError(file: File): String? = runCatching { inspect(file) }
@@ -100,8 +104,21 @@ internal object WavConcatenator {
             require(resolvedFormat.audioFormat in SUPPORTED_WAV_FORMATS) {
                 "Unsupported WAV format in ${file.name}"
             }
-            require(resolvedFormat.channelCount > 0 && resolvedFormat.blockAlign > 0) {
+            require(resolvedFormat.isConvertibleToPcm16()) {
+                "Unsupported PCM encoding in ${file.name}"
+            }
+            require(
+                resolvedFormat.sampleRate > 0L &&
+                    resolvedFormat.channelCount in 1..2 &&
+                    resolvedFormat.blockAlign > 0
+            ) {
                 "Invalid WAV format in ${file.name}"
+            }
+            require(resolvedFormat.blockAlign == resolvedFormat.bytesPerFrame) {
+                "Invalid WAV block alignment in ${file.name}"
+            }
+            require(resolvedFormat.byteRate == resolvedFormat.sampleRate * resolvedFormat.blockAlign) {
+                "Invalid WAV byte rate in ${file.name}"
             }
             require(dataOffset >= 0 && dataSize > 0 && dataSize % resolvedFormat.blockAlign == 0L) {
                 "Invalid WAV audio data in ${file.name}"
@@ -110,13 +127,42 @@ internal object WavConcatenator {
         }
     }
 
-    private fun copy(source: RandomAccessFile, output: RandomAccessFile, bytes: Long) {
-        var remaining = bytes
-        val buffer = ByteArray(COPY_BUFFER_SIZE)
+    private fun copy(
+        source: RandomAccessFile,
+        output: RandomAccessFile,
+        input: WavInput,
+        outputFormat: WavFormat
+    ) {
+        var remaining = input.dataSize
+        val inputBytesPerFrame = input.format.blockAlign
+        val inputBufferSize = COPY_BUFFER_SIZE - (COPY_BUFFER_SIZE % inputBytesPerFrame)
+        val inputBuffer = ByteArray(inputBufferSize)
+        val maxOutputFrames = ((inputBufferSize / inputBytesPerFrame).toLong() *
+            outputFormat.sampleRate + input.format.sampleRate - 1) / input.format.sampleRate
+        val outputBuffer = ByteArray((maxOutputFrames * outputFormat.blockAlign).toInt())
+        var resampleRemainder = 0L
         while (remaining > 0) {
-            val read = source.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+            val requested = minOf(inputBuffer.size.toLong(), remaining).toInt()
+            val read = source.read(inputBuffer, 0, requested)
             if (read <= 0) throw IOException("Unexpected end of WAV data")
-            output.write(buffer, 0, read)
+            require(read % inputBytesPerFrame == 0) { "Incomplete WAV frame" }
+            var inputOffset = 0
+            var outputOffset = 0
+            repeat(read / inputBytesPerFrame) {
+                var mixedSample = 0
+                repeat(input.format.channelCount) {
+                    mixedSample += input.format.readSample(inputBuffer, inputOffset)
+                    inputOffset += input.format.bytesPerSample
+                }
+                val monoSample = mixedSample / input.format.channelCount
+                resampleRemainder += outputFormat.sampleRate
+                while (resampleRemainder >= input.format.sampleRate) {
+                    outputBuffer[outputOffset++] = (monoSample and 0xFF).toByte()
+                    outputBuffer[outputOffset++] = (monoSample ushr 8 and 0xFF).toByte()
+                    resampleRemainder -= input.format.sampleRate
+                }
+            }
+            output.write(outputBuffer, 0, outputOffset)
             remaining -= read
         }
     }
@@ -182,7 +228,10 @@ internal object WavConcatenator {
         val format: WavFormat,
         val dataOffset: Long,
         val dataSize: Long
-    )
+    ) {
+        val frameCount: Long = dataSize / format.blockAlign
+        val normalizedFrameCount: Long = frameCount * EXPORT_SAMPLE_RATE / format.sampleRate
+    }
 
     private data class WavFormat(
         val audioFormat: Int,
@@ -191,7 +240,43 @@ internal object WavConcatenator {
         val byteRate: Long,
         val blockAlign: Int,
         val bitsPerSample: Int
-    )
+    ) {
+        val bytesPerSample: Int get() = bitsPerSample / 8
+        val bytesPerFrame: Int get() = channelCount * bytesPerSample
+
+        fun isConvertibleToPcm16(): Boolean = when (audioFormat) {
+            PCM -> bitsPerSample == 8 || bitsPerSample == 16
+            IEEE_FLOAT -> bitsPerSample == 32
+            else -> false
+        }
+
+        fun readSample(data: ByteArray, offset: Int): Int = when (audioFormat) {
+            PCM -> when (bitsPerSample) {
+                8 -> ((data[offset].toInt() and 0xFF) - 128) shl 8
+                16 -> (data[offset].toInt() and 0xFF) or (data[offset + 1].toInt() shl 8)
+                else -> error("Unsupported PCM encoding")
+            }
+            IEEE_FLOAT -> {
+                val bits = (data[offset].toInt() and 0xFF) or
+                    ((data[offset + 1].toInt() and 0xFF) shl 8) or
+                    ((data[offset + 2].toInt() and 0xFF) shl 16) or
+                    (data[offset + 3].toInt() shl 24)
+                (Float.fromBits(bits).coerceIn(-1f, 1f) * Short.MAX_VALUE).toInt()
+            }
+            else -> error("Unsupported WAV encoding")
+        }
+
+        companion object {
+            fun exportPcm16(): WavFormat = WavFormat(
+                audioFormat = PCM,
+                channelCount = EXPORT_CHANNEL_COUNT,
+                sampleRate = EXPORT_SAMPLE_RATE,
+                byteRate = EXPORT_SAMPLE_RATE * PCM_16_BITS / 8,
+                blockAlign = EXPORT_CHANNEL_COUNT * PCM_16_BITS / 8,
+                bitsPerSample = PCM_16_BITS
+            )
+        }
+    }
 
     private const val RIFF = "RIFF"
     private const val WAVE = "WAVE"
@@ -202,5 +287,10 @@ internal object WavConcatenator {
     private const val PCM_FORMAT_SIZE = 16
     private const val COPY_BUFFER_SIZE = 64 * 1024
     private const val MAX_WAV_DATA_SIZE = 0xFFFF_FFFFL - (HEADER_SIZE - 8)
-    private val SUPPORTED_WAV_FORMATS = setOf(1, 3) // PCM and IEEE float.
+    private const val PCM = 1
+    private const val IEEE_FLOAT = 3
+    private const val PCM_16_BITS = 16
+    private const val EXPORT_SAMPLE_RATE = 22_050L
+    private const val EXPORT_CHANNEL_COUNT = 1
+    private val SUPPORTED_WAV_FORMATS = setOf(PCM, IEEE_FLOAT)
 }

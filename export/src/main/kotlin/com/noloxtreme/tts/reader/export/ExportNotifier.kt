@@ -59,6 +59,7 @@ class ExportNotifier @Inject constructor(
                     when (stage) {
                         ExportStage.SYNTHESIZING -> R.string.export_notification_synthesizing
                         ExportStage.ENCODING -> R.string.export_notification_encoding
+                        ExportStage.REMUXING -> R.string.export_notification_combining
                         ExportStage.SAVING -> R.string.export_notification_saving
                     },
                     percent
@@ -82,6 +83,14 @@ class ExportNotifier @Inject constructor(
             foregroundServiceType()
         )
     }
+
+    internal fun preparingForegroundInfo(documentId: String): ForegroundInfo =
+        foregroundInfo(
+            percent = 0,
+            bookTitle = context.getString(R.string.export_notification_preparing_title),
+            documentId = documentId,
+            stage = ExportStage.SYNTHESIZING
+        )
 
     fun completedNotification(uri: String, displayName: String) {
         val intent = Intent(Intent.ACTION_VIEW)
@@ -124,6 +133,9 @@ class ExportNotifier @Inject constructor(
         ExportError.SYNTHESIS_FAILED -> context.getString(R.string.export_error_synthesis_failed)
         ExportError.ENCODING_FAILED -> context.getString(R.string.export_error_encoding_failed)
         ExportError.STORAGE_FAILED -> context.getString(R.string.export_error_storage_failed)
+        ExportError.FOREGROUND_START_NOT_ALLOWED -> {
+            context.getString(R.string.export_error_foreground_start_not_allowed)
+        }
         ExportError.UNKNOWN -> context.getString(R.string.export_error_unknown)
     }
 
@@ -180,5 +192,6 @@ class ExportNotifier @Inject constructor(
 internal enum class ExportStage {
     SYNTHESIZING,
     ENCODING,
+    REMUXING,
     SAVING
 }

@@ -1854,5 +1854,8 @@ private fun exportErrorMessage(context: Context, error: ExportError): String = w
     ExportError.SYNTHESIS_FAILED -> context.getString(ExportR.string.export_error_synthesis_failed)
     ExportError.ENCODING_FAILED -> context.getString(ExportR.string.export_error_encoding_failed)
     ExportError.STORAGE_FAILED -> context.getString(ExportR.string.export_error_storage_failed)
+    ExportError.FOREGROUND_START_NOT_ALLOWED -> {
+        context.getString(ExportR.string.export_error_foreground_start_not_allowed)
+    }
     ExportError.UNKNOWN -> context.getString(ExportR.string.export_error_unknown)
 }

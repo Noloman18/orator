@@ -3,6 +3,7 @@ package com.noloxtreme.tts.reader.export
 import android.content.Context
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.workDataOf
@@ -32,6 +33,10 @@ class AudioExportCoordinator @Inject constructor(
         notifier.ensureChannels()
         val request = OneTimeWorkRequestBuilder<AudioExportWorker>()
             .setInputData(workDataOf(ExportKeys.DOCUMENT_ID to documentId.value))
+            // On Android 12+ the request starts as an expedited JobScheduler job
+            // while the user is still in Orator, avoiding a delayed foreground
+            // service start after the app has already gone to the background.
+            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .build()
         WorkManager.getInstance(context).enqueueUniqueWork(
             uniqueName(documentId),
