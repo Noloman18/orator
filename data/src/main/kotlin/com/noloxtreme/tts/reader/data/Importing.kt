@@ -7,6 +7,7 @@ import com.noloxtreme.tts.reader.domain.DocumentId
 import com.noloxtreme.tts.reader.domain.DocumentImporter
 import com.noloxtreme.tts.reader.domain.DocumentPosition
 import com.noloxtreme.tts.reader.domain.ImportError
+import com.noloxtreme.tts.reader.domain.ImportPolicy
 import com.noloxtreme.tts.reader.domain.ImportSource
 import com.noloxtreme.tts.reader.domain.ImportState
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -31,7 +32,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.withContext
 
-private const val MAX_SOURCE_BYTES = 100L * 1024L * 1024L
 private const val PARAGRAPH_BATCH_SIZE = 250
 private val TRANSIENT_DIRECTORY_NAME =
     Regex("""\A(\.import-|\.delete-)[0-9a-fA-F-]{36}\z""")
@@ -56,6 +56,12 @@ class SafDocumentImporter @Inject constructor(
         val binarySource = temporaryDirectory.resolve("source.bin")
         var finalDirectory: File? = null
         try {
+            if (!ImportPolicy.supports(source)) {
+                throw ImportException(ImportError.UNSUPPORTED_FORMAT)
+            }
+            if (!ImportPolicy.isWithinSizeLimit(source.reportedSizeBytes)) {
+                throw ImportException(ImportError.FILE_TOO_LARGE)
+            }
             temporaryDirectory.mkdirs()
             copySource(source, binarySource) { copied ->
                 send(ImportState.Copying(copied, source.reportedSizeBytes))
@@ -207,7 +213,7 @@ class SafDocumentImporter @Inject constructor(
         destination: File,
         onProgress: suspend (Long) -> Unit
     ) = withContext(Dispatchers.IO) {
-        if ((source.reportedSizeBytes ?: 0L) > MAX_SOURCE_BYTES) {
+        if (!ImportPolicy.isWithinSizeLimit(source.reportedSizeBytes)) {
             throw ImportException(ImportError.FILE_TOO_LARGE)
         }
         val input = context.contentResolver.openInputStream(Uri.parse(source.opaqueHandle))
@@ -221,7 +227,7 @@ class SafDocumentImporter @Inject constructor(
                     val read = inputStream.read(buffer)
                     if (read < 0) break
                     total += read
-                    if (total > MAX_SOURCE_BYTES) {
+                    if (total > ImportPolicy.MAX_SOURCE_BYTES) {
                         throw ImportException(ImportError.FILE_TOO_LARGE)
                     }
                     output.write(buffer, 0, read)

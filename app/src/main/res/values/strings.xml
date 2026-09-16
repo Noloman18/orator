@@ -71,7 +71,7 @@
     <string name="line_height_comfortable">Comfortable</string>
     <string name="line_height_spacious">Spacious</string>
     <string name="error_unsupported_format">Choose a TXT, Markdown, EPUB, or PDF file</string>
-    <string name="error_file_too_large">The file is larger than 100 MB</string>
+    <string name="error_file_too_large">This book is too large. Orator supports books up to 4 MB.</string>
     <string name="error_source_unreadable">Orator could not read that file</string>
     <string name="error_unsupported_encoding">The text encoding is not supported</string>
     <string name="error_malformed_document">The document is malformed</string>
@@ -118,6 +118,7 @@
     <string name="voice_note_unavailable">This voice note is unavailable.</string>
     <string name="done">Done</string>
     <string name="export_audio">Export audio…</string>
+    <string name="export_started_notice">Audio export started. It may take from a few minutes to a few hours, depending on your device and this book’s length.</string>
     <string name="export_progress_menu">Exporting… %1$d%%</string>
     <string name="export_cancel_menu">Cancel export</string>
     <string name="export_succeeded">Export complete: %1$s — saved to Music/Orator</string>

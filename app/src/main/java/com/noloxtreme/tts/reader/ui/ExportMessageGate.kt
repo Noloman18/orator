@@ -4,6 +4,7 @@ import com.noloxtreme.tts.reader.domain.ExportError
 import com.noloxtreme.tts.reader.domain.ExportState
 
 sealed interface ExportMessage {
+    data object Started : ExportMessage
     data class Succeeded(val displayName: String, val contentUri: String) : ExportMessage
     data class Failed(val error: ExportError, val detail: String? = null) : ExportMessage
 }

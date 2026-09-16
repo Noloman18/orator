@@ -123,6 +123,7 @@ import com.noloxtreme.tts.reader.domain.EPUB_MIME_TYPE
 import com.noloxtreme.tts.reader.domain.ExportError
 import com.noloxtreme.tts.reader.domain.ExportState
 import com.noloxtreme.tts.reader.domain.ImportError
+import com.noloxtreme.tts.reader.domain.ImportPolicy
 import com.noloxtreme.tts.reader.domain.ImportSource
 import com.noloxtreme.tts.reader.domain.ImportState
 import com.noloxtreme.tts.reader.domain.LineHeightPreference
@@ -169,14 +170,6 @@ private const val READER_ROUTE = "reader/{documentId}"
 private const val SPLASH_DURATION_MILLIS = 5_000L
 /** Google's anchored adaptive banner test unit. Never replace this with an app-ads.txt entry. */
 private const val TEST_NOTES_BANNER_AD_UNIT_ID = "ca-app-pub-3940256099942544/9214589741"
-private val SUPPORTED_PICKER_MIME_TYPES = arrayOf(
-    "text/plain",
-    "text/markdown",
-    "text/x-markdown",
-    "application/epub+zip",
-    "application/pdf"
-)
-
 @Composable
 fun OratorApp(appViewModel: AppViewModel = hiltViewModel()) {
     val settings by appViewModel.settings.collectAsState()
@@ -312,7 +305,18 @@ private fun LibraryScreen(
     val picker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
-        if (uri != null) viewModel.import(context.contentResolver.toImportSource(context, uri))
+        if (uri != null) {
+            val source = context.contentResolver.toImportSource(context, uri)
+            when {
+                !ImportPolicy.supports(source) -> scope.launch {
+                    snackbarHostState.showSnackbar(resources.getString(R.string.error_unsupported_format))
+                }
+                !ImportPolicy.isWithinSizeLimit(source.reportedSizeBytes) -> scope.launch {
+                    snackbarHostState.showSnackbar(resources.getString(R.string.error_file_too_large))
+                }
+                else -> viewModel.import(source)
+            }
+        }
     }
 
     LaunchedEffect(importState) {
@@ -344,7 +348,7 @@ private fun LibraryScreen(
         },
         floatingActionButton = {
             FloatingActionButton(onClick = {
-                picker.launch(SUPPORTED_PICKER_MIME_TYPES)
+                picker.launch(ImportPolicy.pickerMimeTypes.toTypedArray())
             }) {
                 Icon(Icons.Outlined.Add, contentDescription = stringResource(R.string.add_book))
             }
@@ -378,7 +382,7 @@ private fun LibraryScreen(
                 }
                 LibraryLoadState.Ready -> if (documents.isEmpty()) {
                     EmptyLibrary(onAddBook = {
-                        picker.launch(SUPPORTED_PICKER_MIME_TYPES)
+                        picker.launch(ImportPolicy.pickerMimeTypes.toTypedArray())
                     })
                 } else {
                     LazyColumn(
@@ -674,6 +678,10 @@ private fun ReaderScreen(
     LaunchedEffect(Unit) {
         viewModel.exportMessages.collect { message ->
             when (message) {
+                ExportMessage.Started -> exportSnackbar.showSnackbar(
+                    message = context.getString(R.string.export_started_notice),
+                    duration = SnackbarDuration.Long
+                )
                 is ExportMessage.Succeeded -> {
                     val result = exportSnackbar.showSnackbar(
                         message = context.getString(R.string.export_succeeded, message.displayName),

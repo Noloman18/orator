@@ -224,7 +224,10 @@ class ReaderViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun exportAudio() {
-        pageRequest.value?.let { id -> audioExporter.export(id) }
+        pageRequest.value?.let { id ->
+            audioExporter.export(id)
+            mutableExportMessages.tryEmit(ExportMessage.Started)
+        }
     }
 
     fun cancelExport() {
