@@ -28,6 +28,13 @@ class VisualReadingTest {
     }
 
     @Test
+    fun `sentence lookup selects one complete sentence at a time`() {
+        assertEquals(TextWordRange(0, 4), sentenceAtOrAfter("One. Two?", 0))
+        assertEquals(TextWordRange(5, 9), sentenceAtOrAfter("One. Two?", 4))
+        assertEquals(TextWordRange(0, 4), sentenceBefore("One. Two?", 5))
+    }
+
+    @Test
     fun `reading pace cycles through five times before returning to normal`() {
         assertEquals(5f, nextVisualReadingPace(4f))
         assertEquals(1f, nextVisualReadingPace(5f))
@@ -37,5 +44,20 @@ class VisualReadingTest {
     fun `faster reading pace uses a shorter dwell time`() {
         assertEquals(300L, visualReadingWordDelayMillis(1f))
         assertEquals(60L, visualReadingWordDelayMillis(5f))
+    }
+
+    @Test
+    fun `sentence dwell time keeps the selected words per minute`() {
+        val text = "One two three."
+
+        assertEquals(
+            900L,
+            visualReadingUnitDelayMillis(
+                pace = 1f,
+                unit = VisualReadingUnit.SENTENCE,
+                text = text,
+                range = TextWordRange(0, text.length)
+            )
+        )
     }
 }

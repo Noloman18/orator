@@ -65,6 +65,10 @@
     <string name="increase_reading_pace_at_rate">Increase reading pace. Current pace: %1$s</string>
     <string name="previous_word">Previous word</string>
     <string name="next_word">Next word</string>
+    <string name="reading_unit_word">Word</string>
+    <string name="reading_unit_sentence">Sentence</string>
+    <string name="switch_to_sentence_reading">Switch to sentence-at-a-time reading</string>
+    <string name="switch_to_word_reading">Switch to one-word-at-a-time reading</string>
     <string name="remove_book_action">Remove book</string>
     <string name="imported_book">Imported book</string>
     <string name="theme_light">Light</string>

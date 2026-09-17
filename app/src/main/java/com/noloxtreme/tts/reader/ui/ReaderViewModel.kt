@@ -588,7 +588,10 @@ class ReaderViewModel @Inject constructor(
     }
 
     private fun setVisualStart(position: DocumentPosition?) {
-        mutableVisualReading.value = VisualReadingState(pace = mutableVisualReading.value.pace)
+        mutableVisualReading.value = VisualReadingState(
+            pace = mutableVisualReading.value.pace,
+            unit = mutableVisualReading.value.unit
+        )
         mutableActiveWordAnchor.value = null
         visualCursorStart = position
     }
@@ -610,12 +613,22 @@ class ReaderViewModel @Inject constructor(
             }
             mutableVisualReading.update { it.copy(isPlaying = true, completed = false) }
             while (isActive && mutableReadMode.value && mutableVisualReading.value.isPlaying) {
-                val word = nextVisualWord() ?: run {
+                val selection = nextVisualUnit() ?: run {
                     mutableVisualReading.update { it.copy(isPlaying = false, completed = true) }
                     break
                 }
-                setActiveVisualWord(word)
-                delay(visualReadingWordDelayMillis(mutableVisualReading.value.pace))
+                setActiveVisualWord(selection)
+                delay(
+                    visualReadingUnitDelayMillis(
+                        pace = mutableVisualReading.value.pace,
+                        unit = mutableVisualReading.value.unit,
+                        text = selection.text,
+                        range = TextWordRange(
+                            selection.range.startInParagraph,
+                            selection.range.endExclusiveInParagraph
+                        )
+                    )
+                )
             }
         }
     }
@@ -624,6 +637,21 @@ class ReaderViewModel @Inject constructor(
         mutableVisualReading.update { reading ->
             reading.copy(pace = nextVisualReadingPace(reading.pace))
         }
+    }
+
+    /** Switches between single-word RSVP and sentence-at-a-time chunked reading. */
+    fun toggleVisualReadingUnit() {
+        if (!mutableReadMode.value) return
+        val current = mutableVisualReading.value
+        val resumePosition = current.activeWord?.position ?: visualCursorStart
+        val resumePlayback = current.isPlaying
+        stopVisualReading(clearCursor = false)
+        mutableVisualReading.value = VisualReadingState(
+            pace = current.pace,
+            unit = current.unit.next()
+        )
+        visualCursorStart = resumePosition
+        if (resumePlayback) toggleVisualReading()
     }
 
     fun previousReadUnit() {
@@ -637,8 +665,8 @@ class ReaderViewModel @Inject constructor(
     private fun moveVisualWord(previous: Boolean) {
         stopVisualReading(clearCursor = false)
         viewModelScope.launch {
-            val word = if (previous) previousVisualWord() else nextVisualWord()
-            if (word != null) setActiveVisualWord(word)
+            val selection = if (previous) previousVisualUnit() else nextVisualUnit()
+            if (selection != null) setActiveVisualWord(selection)
         }
     }
 
@@ -648,7 +676,11 @@ class ReaderViewModel @Inject constructor(
         visualReadingJob?.cancel()
         visualReadingJob = null
         mutableVisualReading.update {
-            if (clearCursor) VisualReadingState(pace = it.pace) else it.copy(isPlaying = false)
+            if (clearCursor) {
+                VisualReadingState(pace = it.pace, unit = it.unit)
+            } else {
+                it.copy(isPlaying = false)
+            }
         }
         if (clearCursor) mutableActiveWordAnchor.value = null
     }
@@ -672,7 +704,7 @@ class ReaderViewModel @Inject constructor(
         }
     }
 
-    private suspend fun nextVisualWord(): VisualWord? {
+    private suspend fun nextVisualUnit(): VisualWord? {
         val id = pageRequest.value ?: return null
         val active = mutableVisualReading.value.activeWord
         val start = active?.position ?: visualCursorStart ?: visualStartPosition(id) ?: return null
@@ -680,14 +712,17 @@ class ReaderViewModel @Inject constructor(
         var offset = active?.range?.endExclusiveInParagraph ?: start.offsetInParagraph
         while (true) {
             val paragraph = contentRepository.paragraph(id, paragraphIndex) ?: return null
-            val range = wordAtOrAfter(paragraph.text, offset)
+            val range = when (mutableVisualReading.value.unit) {
+                VisualReadingUnit.WORD -> wordAtOrAfter(paragraph.text, offset)
+                VisualReadingUnit.SENTENCE -> sentenceAtOrAfter(paragraph.text, offset)
+            }
             if (range != null) return visualWord(paragraph, range)
             paragraphIndex += 1
             offset = 0
         }
     }
 
-    private suspend fun previousVisualWord(): VisualWord? {
+    private suspend fun previousVisualUnit(): VisualWord? {
         val id = pageRequest.value ?: return null
         val active = mutableVisualReading.value.activeWord
         val start = active?.position ?: visualCursorStart ?: return null
@@ -695,7 +730,10 @@ class ReaderViewModel @Inject constructor(
         var offset = active?.range?.startInParagraph ?: start.offsetInParagraph
         while (paragraphIndex >= 0) {
             val paragraph = contentRepository.paragraph(id, paragraphIndex) ?: return null
-            val range = wordBefore(paragraph.text, offset)
+            val range = when (mutableVisualReading.value.unit) {
+                VisualReadingUnit.WORD -> wordBefore(paragraph.text, offset)
+                VisualReadingUnit.SENTENCE -> sentenceBefore(paragraph.text, offset)
+            }
             if (range != null) return visualWord(paragraph, range)
             paragraphIndex -= 1
             offset = Int.MAX_VALUE
@@ -709,7 +747,8 @@ class ReaderViewModel @Inject constructor(
             offsetInParagraph = range.start,
             absoluteOffset = paragraph.absoluteStart + range.start
         ),
-        range = SpokenRange(paragraph.paragraphIndex, range.start, range.endExclusive)
+        range = SpokenRange(paragraph.paragraphIndex, range.start, range.endExclusive),
+        text = paragraph.text
     )
 
     private suspend fun setActiveVisualWord(word: VisualWord) {

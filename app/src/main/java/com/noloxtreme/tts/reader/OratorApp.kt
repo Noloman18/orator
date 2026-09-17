@@ -152,6 +152,7 @@ import com.noloxtreme.tts.reader.ui.EpubReaderPane
 import com.noloxtreme.tts.reader.ui.EpubTocSheet
 import com.noloxtreme.tts.reader.ui.lineHeightMultiplier
 import com.noloxtreme.tts.reader.ui.SettingsViewModel
+import com.noloxtreme.tts.reader.ui.VisualReadingUnit
 import com.noloxtreme.tts.reader.ui.VoicePreviewStatus
 import com.noloxtreme.tts.reader.ui.theme.OratorTheme
 import com.google.android.gms.ads.AdRequest
@@ -865,7 +866,9 @@ private fun ReaderScreen(
                     pagedReading = isEpubReadMode,
                     speechRate = settings.speechRate,
                     visualReadingPace = visualReading.pace,
+                    visualReadingUnit = visualReading.unit,
                     visualReadingCompleted = visualReading.completed,
+                    onToggleVisualUnit = viewModel::toggleVisualReadingUnit,
                     onPlay = {
                         if (inReadMode) {
                             viewModel.toggleVisualReading()
@@ -1455,7 +1458,9 @@ private fun ReaderControls(
     pagedReading: Boolean,
     speechRate: Float,
     visualReadingPace: Float,
+    visualReadingUnit: VisualReadingUnit,
     visualReadingCompleted: Boolean,
+    onToggleVisualUnit: () -> Unit,
     onPlay: () -> Unit
 ) {
     val speedLabel = narrationSpeedLabel(if (reading) visualReadingPace else speechRate)
@@ -1464,6 +1469,20 @@ private fun ReaderControls(
         speedLabel
     )
     val completed = if (reading) visualReadingCompleted else narration is NarrationState.Completed
+    val visualUnitLabel = stringResource(
+        if (visualReadingUnit == VisualReadingUnit.WORD) {
+            R.string.reading_unit_word
+        } else {
+            R.string.reading_unit_sentence
+        }
+    )
+    val visualUnitButtonDescription = stringResource(
+        if (visualReadingUnit == VisualReadingUnit.WORD) {
+            R.string.switch_to_sentence_reading
+        } else {
+            R.string.switch_to_word_reading
+        }
+    )
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -1484,6 +1503,7 @@ private fun ReaderControls(
                         when {
                             !reading -> R.string.previous_sentence
                             pagedReading -> R.string.previous_page
+                            visualReadingUnit == VisualReadingUnit.SENTENCE -> R.string.previous_sentence
                             else -> R.string.previous_word
                         }
                     )
@@ -1512,10 +1532,24 @@ private fun ReaderControls(
                         when {
                             !reading -> R.string.next_sentence
                             pagedReading -> R.string.next_page
+                            visualReadingUnit == VisualReadingUnit.SENTENCE -> R.string.next_sentence
                             else -> R.string.next_word
                         }
                     )
                 )
+            }
+            if (reading) {
+                TextButton(
+                    onClick = onToggleVisualUnit,
+                    modifier = Modifier.semantics { contentDescription = visualUnitButtonDescription }
+                ) {
+                    Text(
+                        text = visualUnitLabel,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
             IconButton(
                 onClick = transport::increaseSpeed,
