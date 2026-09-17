@@ -1,0 +1,8 @@
+Version 1.6.1 (build 10)
+
+What's new in this release:
+
+- Audio exports are more reliable for long books, including on Samsung devices, and now explain that larger books can take time to finish
+- Add text or voice notes at your current place in a book, then return to that passage later
+- The Book Notes screen now includes a small footer advertisement to help support Orator
+- Importing is limited to supported TXT, Markdown, EPUB, and PDF books up to 4 MB

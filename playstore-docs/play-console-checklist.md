@@ -3,8 +3,8 @@
 ## Ready in the repository
 
 - [x] Signed-bundle Gradle task: `./gradlew buildSignedBundle`.
-- [x] Release metadata: application ID `com.noloxtreme.tts.reader`, version `1.2`,
-      `versionCode 3`, target API 37.
+- [x] Release metadata: application ID `com.noloxtreme.tts.reader`, version `1.6.1`,
+      `versionCode 10`, target API 37.
 - [x] Play icon, feature graphic, and three upload-ready phone screenshots.
 - [x] Foreground-service demo video published on YouTube — see
       [foreground-service-video.md](foreground-service-video.md).
@@ -21,9 +21,9 @@
       verification.
 - [ ] Complete the category, target audience, content-rating questionnaire, and
       Data safety form.
-- [ ] Before a production ad release, replace the Google Mobile Ads test app and ad
-      unit identifiers, configure and test the applicable consent and privacy-options
-      flow, and re-check the store listing, privacy policy, and Data safety answers.
+- [x] Production Google Mobile Ads app and banner identifiers are configured.
+- [ ] Configure and test the UMP consent and privacy-options flow, then re-check the
+      store listing, privacy policy, and Data safety answers before publishing live ads.
 - [ ] Enrol in Google Play App Signing and keep the upload keystore and passwords
       backed up securely outside the repository.
 - [ ] Build the signed AAB with the release keystore and upload it to an internal or

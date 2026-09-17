@@ -2,10 +2,10 @@
 
 This is source material for the Play Console Data safety form, not a replacement for
 the form. It must be completed for the exact AAB submitted. The current source
-includes the Google Mobile Ads SDK with Google's test app and banner identifiers, so
+includes the Google Mobile Ads SDK with production app and banner identifiers, so
 the former no-data answer below is no longer valid.
 
-## Current test-ad build: review required before submission
+## Current live-ad build: review required before submission
 
 ### Does your app collect or share any required user data types?
 
@@ -17,9 +17,9 @@ is responsible for the final answers, including any data introduced by the exact
 production ad configuration:
 <https://developers.google.com/admob/android/privacy/play-data-disclosure>.
 
-Before a production release, replace the Google test identifiers with the intended
-production identifiers, audit the resulting AAB, configure the applicable consent
-flow, and complete the Data safety form from Google's current guidance.
+Before publishing, audit the resulting AAB, configure and test the applicable UMP
+consent and privacy-options flow, and complete the Data safety form from Google's
+current guidance.
 
 ### Data types handled locally but not transmitted
 

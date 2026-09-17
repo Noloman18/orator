@@ -17,9 +17,9 @@ The core reader and narration are designed to work offline with the text-to-spee
 engine and voices installed on your Android device.
 
 The Book Notes screen can display a footer advertisement through the Google Mobile
-Ads SDK. The development build currently uses Google's test ad identifiers; this
-policy must be reviewed and updated for the exact production advertising setup
-before that build is released.
+Ads SDK. This release is configured with production ad identifiers. Before it is
+published, the developer must configure and test the applicable consent and
+privacy-options flow and ensure this policy matches the final setup.
 
 ## Information processed on your device
 

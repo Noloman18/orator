@@ -20,7 +20,7 @@ Release artifacts and submission notes for the Google Play listing of Orator.
 
 - App: `Orator`
 - Application ID: `com.noloxtreme.tts.reader`
-- Version: `1.5` (`versionCode 7`)
+- Version: `1.6.1` (`versionCode 10`)
 - Target API: 37
 - Signed bundle task: `./gradlew buildSignedBundle`
 - Bundle output: `app/release/app-release.aab`
