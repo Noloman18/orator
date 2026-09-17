@@ -1,6 +1,7 @@
 package com.noloxtreme.tts.reader.ui
 
 import android.content.Context
+import android.util.LruCache
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.paging.PagingData
@@ -45,6 +46,7 @@ import com.noloxtreme.tts.reader.domain.usecase.OpenDocument
 import com.noloxtreme.tts.reader.domain.usecase.PauseNarration
 import com.noloxtreme.tts.reader.domain.usecase.RestartCompletedDocument
 import com.noloxtreme.tts.reader.domain.usecase.SaveReaderPosition
+import com.noloxtreme.tts.reader.domain.usecase.SaveReadingProgress
 import com.noloxtreme.tts.reader.domain.usecase.SeekNarration
 import com.noloxtreme.tts.reader.domain.usecase.SkipSentence
 import com.noloxtreme.tts.reader.domain.usecase.StartOrResumeNarration
@@ -116,6 +118,7 @@ class ReaderViewModel @Inject constructor(
     private val loadImageResource: LoadImageResource,
     private val observeReaderPosition: ObserveReaderPosition,
     private val saveReaderPosition: SaveReaderPosition,
+    private val saveReadingProgress: SaveReadingProgress,
     val narrationController: NarrationController,
     private val audioExporter: AudioExporter,
     private val bookNoteRepository: BookNoteRepository,
@@ -131,8 +134,14 @@ class ReaderViewModel @Inject constructor(
     private val mutableReaderPageCount = MutableStateFlow(0)
     private val mutableJumpTarget = MutableStateFlow<PageTextAnchor?>(null)
     private val mutableActiveWordAnchor = MutableStateFlow<PageTextRange?>(null)
-    private val imageCache = java.util.concurrent.ConcurrentHashMap<String, ByteArray?>()
+    /** Keeps EPUB image bytes bounded while chapter layouts inspect their dimensions. */
+    private val imageCache = object : LruCache<String, ByteArray>(EPUB_IMAGE_CACHE_MAX_BYTES) {
+        override fun sizeOf(key: String, value: ByteArray): Int = value.size
+    }
     private var visualReadingJob: Job? = null
+    private var visualProgressCheckpointJob: Job? = null
+    private var pendingVisualProgress: VisualProgressCheckpoint? = null
+    private var spineLoadRequestId = 0L
 
     /** Whether the reader is in silent Read Mode rather than audio narration mode. */
     val readMode: StateFlow<Boolean> = mutableReadMode.asStateFlow()
@@ -164,14 +173,11 @@ class ReaderViewModel @Inject constructor(
         nextWordAction = ::nextReadUnit,
         increasePaceAction = ::increaseVisualReadingPace
     )
-
-    /**
-     * The transport strategy matching the current mode: word movement during
-     * silent Read Mode, sentence movement during narration otherwise.
-     */
-    val transport: StateFlow<ReaderTransport> = mutableReadMode
-        .map { reading -> if (reading) visualReadTransport else narrationTransport }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), narrationTransport)
+    private val pagedReadTransport = PagedReadingTransport(
+        previousPageAction = ::previousReaderPage,
+        nextPageAction = ::nextReaderPage,
+        increasePaceAction = ::increaseVisualReadingPace
+    )
 
     private val readerContent = pageRequest.flatMapLatest { id ->
         if (id == null) emptyFlow()
@@ -182,6 +188,18 @@ class ReaderViewModel @Inject constructor(
     val document: StateFlow<Document?> = content
         .map { it?.document }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /**
+     * EPUB Read Mode turns pages with its skip controls. Generic silent
+     * reading keeps word-level movement, while narration keeps sentence skips.
+     */
+    val transport: StateFlow<ReaderTransport> = combine(mutableReadMode, document) { reading, currentDocument ->
+        when {
+            !reading -> narrationTransport
+            currentDocument?.mimeType == EPUB_MIME_TYPE -> pagedReadTransport
+            else -> visualReadTransport
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), narrationTransport)
 
     val loadState: StateFlow<ReaderLoadState> = content
         .map { value ->
@@ -289,6 +307,23 @@ class ReaderViewModel @Inject constructor(
         }
     }
 
+    /** Removes a note and its optional recording without touching other notes for the book. */
+    fun deleteNote(note: BookNote) {
+        if (note.documentId != pageRequest.value) return
+        viewModelScope.launch {
+            val removed = try {
+                withContext(Dispatchers.IO) {
+                    if (!bookNoteRepository.delete(note.id)) return@withContext false
+                    deleteStoredVoice(note)
+                    true
+                }
+            } catch (_: Throwable) {
+                false
+            }
+            mutableNoteMessages.emit(if (removed) NoteMessage.Deleted else NoteMessage.DeleteFailed)
+        }
+    }
+
     /** Returns the reader to the position a note was captured from. */
     fun goToNote(position: DocumentPosition) {
         if (mutableReadMode.value) {
@@ -370,6 +405,22 @@ class ReaderViewModel @Inject constructor(
         )
     }
 
+    /** Deletes only the file path that this note could have created. */
+    private fun deleteStoredVoice(note: BookNote) {
+        val relativePath = note.voiceRelativePath ?: return
+        val notesRoot = File(appContext.filesDir, "voice-notes").canonicalFile
+        val documentDirectory = File(notesRoot, note.documentId.value).canonicalFile
+        val voiceFile = File(appContext.filesDir, relativePath).canonicalFile
+        if (
+            documentDirectory.parentFile != notesRoot ||
+            voiceFile.parentFile != documentDirectory ||
+            voiceFile.name != "${note.id}.m4a"
+        ) return
+
+        voiceFile.delete()
+        if (documentDirectory.listFiles()?.isEmpty() == true) documentDirectory.delete()
+    }
+
     fun play() = startOrResumeNarration.execute()
 
     fun pause() = pauseNarration.execute()
@@ -425,6 +476,7 @@ class ReaderViewModel @Inject constructor(
                 absoluteOffset = paragraph.absoluteStart + offset
             )
             setVisualStart(position)
+            checkpointVisualProgress(position, immediately = true)
             val reading = mutableEpubReading.value ?: return@launch
             val targetSpine = paragraph.sectionIndex + reading.coverOffset
             if (targetSpine != reading.currentSpineIndex) {
@@ -440,6 +492,8 @@ class ReaderViewModel @Inject constructor(
         if (mutableReadMode.value) return
         val id = pageRequest.value ?: return
         val isEpub = document.value?.mimeType == EPUB_MIME_TYPE
+        val narrationWasActive = narrationController.state.value is NarrationState.Playing ||
+            narrationController.state.value is NarrationState.Preparing
         mutableReadMode.value = true
         // Read Mode is deliberately silent. Never leave a TTS utterance
         // running underneath the moving visual word pointer.
@@ -448,7 +502,13 @@ class ReaderViewModel @Inject constructor(
         mutableReaderPageIndex.value = 0
         mutableReaderPageCount.value = 0
         viewModelScope.launch {
-            val startPosition = visualStartPosition(id)
+            // A saved EPUB page is its own visual-reading checkpoint. Only an
+            // actively playing narration should take precedence over it.
+            val startPosition = if (isEpub && !narrationWasActive) {
+                null
+            } else {
+                visualStartPosition(id)
+            }
             if (pageRequest.value != id || !mutableReadMode.value) return@launch
             setVisualStart(startPosition)
             if (isEpub) enterEpubReadMode(id, startPosition)
@@ -510,9 +570,12 @@ class ReaderViewModel @Inject constructor(
     }
 
     private suspend fun visualStartPosition(id: DocumentId): DocumentPosition? {
-        val narrated = narrationController.state.value
-            .takeIf { it.documentIdOrNull() == id }
-            ?.positionOrNull()
+        val narration = narrationController.state.value
+        val narrated = when (narration) {
+            is NarrationState.Playing -> narration.safePosition
+            is NarrationState.Preparing -> narration.requestedPosition
+            else -> null
+        }?.takeIf { narration.documentIdOrNull() == id }
         if (narrated != null) return narrated
         return observeReadingProgress.execute(id).first()?.position
             ?: contentRepository.paragraph(id, 0)?.let { paragraph ->
@@ -580,12 +643,33 @@ class ReaderViewModel @Inject constructor(
     }
 
     private fun stopVisualReading(clearCursor: Boolean) {
+        (mutableVisualReading.value.activeWord?.position ?: visualCursorStart)
+            ?.let { position -> checkpointVisualProgress(position, immediately = true) }
         visualReadingJob?.cancel()
         visualReadingJob = null
         mutableVisualReading.update {
             if (clearCursor) VisualReadingState(pace = it.pace) else it.copy(isPlaying = false)
         }
         if (clearCursor) mutableActiveWordAnchor.value = null
+    }
+
+    /** Records a manually scrolled generic Read Mode paragraph without changing narration state. */
+    fun rememberVisibleReadParagraph(paragraphIndex: Int) {
+        if (!mutableReadMode.value || mutableVisualReading.value.isPlaying) return
+        val id = pageRequest.value ?: return
+        viewModelScope.launch {
+            val paragraph = contentRepository.paragraph(id, paragraphIndex) ?: return@launch
+            if (pageRequest.value != id || !mutableReadMode.value ||
+                mutableVisualReading.value.isPlaying
+            ) return@launch
+            checkpointVisualProgress(
+                DocumentPosition(
+                    paragraphIndex = paragraph.paragraphIndex,
+                    offsetInParagraph = 0,
+                    absoluteOffset = paragraph.absoluteStart
+                )
+            )
+        }
     }
 
     private suspend fun nextVisualWord(): VisualWord? {
@@ -630,6 +714,7 @@ class ReaderViewModel @Inject constructor(
 
     private suspend fun setActiveVisualWord(word: VisualWord) {
         mutableVisualReading.update { it.copy(activeWord = word, completed = false) }
+        checkpointVisualProgress(word.position)
         val id = pageRequest.value ?: return
         val reading = mutableEpubReading.value ?: return
         val paragraph = contentRepository.paragraph(id, word.position.paragraphIndex) ?: return
@@ -732,8 +817,9 @@ class ReaderViewModel @Inject constructor(
         }
     }
 
-    /** The paged reader reports how many pages the current chapter was packed into. */
-    fun setReaderPageCount(count: Int) {
+    /** Accepts a page count only from the spine item currently on screen. */
+    fun setReaderPageCount(spineIndex: Int, count: Int) {
+        if (mutableEpubReading.value?.currentSpineIndex != spineIndex) return
         mutableReaderPageCount.value = count.coerceAtLeast(0)
         val maxIndex = (count - 1).coerceAtLeast(0)
         if (mutableReaderPageIndex.value > maxIndex) {
@@ -745,9 +831,11 @@ class ReaderViewModel @Inject constructor(
     suspend fun imageBytes(resourcePath: String): ByteArray? {
         val id = pageRequest.value ?: return null
         val cacheKey = id.value + "/" + resourcePath
-        if (imageCache.containsKey(cacheKey)) return imageCache[cacheKey]
-        val bytes = runCatching { loadImageResource.execute(id, resourcePath) }.getOrNull()
-        imageCache[cacheKey] = bytes
+        imageCache.get(cacheKey)?.let { return it }
+        // LruCache and ConcurrentHashMap both reject null values. Failed image
+        // reads are intentionally not cached so they cannot crash Read Mode.
+        val bytes = runCatching { loadImageResource.execute(id, resourcePath) }.getOrNull() ?: return null
+        imageCache.put(cacheKey, bytes)
         return bytes
     }
 
@@ -763,15 +851,31 @@ class ReaderViewModel @Inject constructor(
         narrationJump: DocumentPosition? = null
     ) {
         val id = pageRequest.value ?: return
+        val requestId = ++spineLoadRequestId
         mutableReaderPageIndex.value = initialPageIndex
         mutableReaderPageCount.value = 0
         mutableJumpTarget.value = null
         mutableActiveWordAnchor.value = null
-        mutableEpubReading.update { it?.copy(currentSpineIndex = spineIndex, loadingContent = true) }
+        // Dispose the old chapter while the next one loads. Otherwise a cover
+        // and a one-page chapter can both report one page, leaving the reset
+        // count at zero and making every forward turn a no-op.
+        mutableEpubReading.update {
+            it?.copy(
+                currentSpineIndex = spineIndex,
+                content = null,
+                loadingContent = true,
+                unavailable = false
+            )
+        }
         persistReaderPosition(initialPageIndex)
         viewModelScope.launch {
             val content = runCatching { loadSpineContent.execute(id, spineIndex) }.getOrNull()
-            if (pageRequest.value != id || !mutableReadMode.value || mutableEpubReading.value == null) {
+            if (
+                pageRequest.value != id ||
+                !mutableReadMode.value ||
+                mutableEpubReading.value?.currentSpineIndex != spineIndex ||
+                requestId != spineLoadRequestId
+            ) {
                 return@launch
             }
             mutableEpubReading.update {
@@ -828,6 +932,37 @@ class ReaderViewModel @Inject constructor(
     }
 
     /**
+     * Checkpoint the silent reader no more than once per second while it advances,
+     * but flush immediately when the user pauses, exits, seeks, or makes a note.
+     */
+    private fun checkpointVisualProgress(position: DocumentPosition, immediately: Boolean = false) {
+        val documentId = pageRequest.value ?: return
+        val checkpoint = VisualProgressCheckpoint(documentId, position)
+        pendingVisualProgress = checkpoint
+        if (immediately) {
+            visualProgressCheckpointJob?.cancel()
+            visualProgressCheckpointJob = viewModelScope.launch { saveVisualProgress(checkpoint) }
+        } else if (visualProgressCheckpointJob?.isActive != true) {
+            visualProgressCheckpointJob = viewModelScope.launch {
+                delay(VISUAL_PROGRESS_CHECKPOINT_INTERVAL_MS)
+                val pending = pendingVisualProgress
+                if (pending != null) saveVisualProgress(pending)
+            }
+        }
+    }
+
+    private suspend fun saveVisualProgress(checkpoint: VisualProgressCheckpoint) {
+        saveReadingProgress.execute(
+            ReadingProgress(
+                documentId = checkpoint.documentId,
+                position = checkpoint.position,
+                updatedAtEpochMillis = timeProvider.nowEpochMillis(),
+                completed = false
+            )
+        )
+    }
+
+    /**
      * The read-mode spine index matching the current narration position. Real
      * section indices are shifted by the synthesized cover page when the book
      * has one, so a fresh book (no progress) lands on the cover at index 0.
@@ -835,8 +970,8 @@ class ReaderViewModel @Inject constructor(
     private suspend fun currentSpineIndexFor(id: DocumentId, coverOffset: Int): Int {
         val narratedIndex = narrationController.state.value.paragraphIndexOrNull()
             ?.takeIf { narrationController.state.value.documentIdOrNull() == id }
-        val progressIndex = narratedIndex
-            ?: observeReadingProgress.execute(id).first()?.position?.paragraphIndex
+        val progressIndex = observeReadingProgress.execute(id).first()?.position?.paragraphIndex
+            ?: narratedIndex
             ?: return 0
         return contentRepository.paragraph(id, progressIndex)?.sectionIndex?.plus(coverOffset) ?: 0
     }
@@ -845,6 +980,8 @@ class ReaderViewModel @Inject constructor(
 sealed interface NoteMessage {
     data object Saved : NoteMessage
     data object Failed : NoteMessage
+    data object Deleted : NoteMessage
+    data object DeleteFailed : NoteMessage
 }
 
 private data class StoredVoice(
@@ -852,6 +989,14 @@ private data class StoredVoice(
     val durationMillis: Long,
     val file: File
 )
+
+private data class VisualProgressCheckpoint(
+    val documentId: DocumentId,
+    val position: DocumentPosition
+)
+
+private const val EPUB_IMAGE_CACHE_MAX_BYTES = 8 * 1024 * 1024
+private const val VISUAL_PROGRESS_CHECKPOINT_INTERVAL_MS = 1_000L
 
 private fun NarrationState.documentIdOrNull(): DocumentId? = when (this) {
     is NarrationState.Preparing -> documentId

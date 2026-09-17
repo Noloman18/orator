@@ -85,6 +85,12 @@ internal val DividerVerticalPadding = 10.dp
 private val ImagePlaceholderHeight = 150.dp
 private const val IMAGE_MAX_PAGE_FRACTION = 0.7f
 
+/** A stable page snapshot so an outgoing page never indexes a newer page list. */
+private data class RenderedPage(
+    val pages: List<Page>,
+    val index: Int
+)
+
 /** Maps the shared line-spacing preference to a multiplier, reused by both reader panes. */
 internal fun lineHeightMultiplier(preference: LineHeightPreference): Float = when (preference) {
     LineHeightPreference.COMPACT -> 1.35f
@@ -182,7 +188,7 @@ fun EpubReaderPane(
     activeWord: PageTextRange? = null,
     onNextPage: () -> Unit,
     onPreviousPage: () -> Unit,
-    onPageCountChange: (Int) -> Unit,
+    onPageCountChange: (spineIndex: Int, count: Int) -> Unit,
     onJumpTargetResolved: (Int) -> Unit,
     onRetry: () -> Unit,
     onToggleChrome: () -> Unit,
@@ -199,6 +205,7 @@ fun EpubReaderPane(
                 CircularProgressIndicator()
             }
             else -> PagedChapterView(
+                spineIndex = spineContent.spineIndex,
                 blocks = spineContent.blocks,
                 fontSizeSp = fontSizeSp,
                 lineHeight = lineHeight,
@@ -219,6 +226,7 @@ fun EpubReaderPane(
 
 @Composable
 private fun PagedChapterView(
+    spineIndex: Int,
     blocks: List<EpubBlock>,
     fontSizeSp: Int,
     lineHeight: LineHeightPreference,
@@ -228,7 +236,7 @@ private fun PagedChapterView(
     activeWord: PageTextRange?,
     onNextPage: () -> Unit,
     onPreviousPage: () -> Unit,
-    onPageCountChange: (Int) -> Unit,
+    onPageCountChange: (spineIndex: Int, count: Int) -> Unit,
     onJumpTargetResolved: (Int) -> Unit,
     onToggleChrome: () -> Unit,
     loadImageBytes: suspend (String) -> ByteArray?
@@ -275,8 +283,8 @@ private fun PagedChapterView(
         val pages = remember(blocks, pageWidthPx, pageHeightPx, fontSizeSp, lineHeight, imageHeights, styles) {
             EpubPagination.paginate(blocks, pageHeightPx.toFloat(), gapPx, measurer)
         }
-        LaunchedEffect(pages.size) {
-            onPageCountChange(pages.size)
+        LaunchedEffect(spineIndex, pages.size) {
+            onPageCountChange(spineIndex, pages.size)
         }
         val lastPageIndex = (pages.size - 1).coerceAtLeast(0)
         val safePageIndex = pageIndex.coerceIn(0, lastPageIndex)
@@ -297,6 +305,9 @@ private fun PagedChapterView(
         val previousPage by rememberUpdatedState(onPreviousPage)
         val toggleChrome by rememberUpdatedState(onToggleChrome)
 
+        val renderedPage = remember(pages, effectivePageIndex) {
+            RenderedPage(pages = pages, index = effectivePageIndex)
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -329,10 +340,10 @@ private fun PagedChapterView(
                 }
         ) {
             AnimatedContent(
-                targetState = effectivePageIndex,
+                targetState = renderedPage,
                 modifier = Modifier.fillMaxSize(),
                 transitionSpec = {
-                    val forward = targetState > initialState
+                    val forward = targetState.index > initialState.index
                     if (forward) {
                         (slideInHorizontally { it } + fadeIn()) togetherWith
                             (slideOutHorizontally { -it } + fadeOut())
@@ -342,10 +353,10 @@ private fun PagedChapterView(
                     }
                 },
                 label = "epubPageTurn"
-            ) { index ->
+            ) { rendered ->
                 PagedPageContent(
                     blocks = blocks,
-                    page = pages[index],
+                    page = rendered.pages[rendered.index],
                     activeWord = activeWord,
                     fontSizeSp = fontSizeSp,
                     lineHeight = lineHeight,
@@ -353,6 +364,7 @@ private fun PagedChapterView(
                     gap = OratorDesignTokens.readerParagraphGap,
                     placeholderHeightPx = placeholderHeightPx,
                     imageHeights = imageHeights,
+                    imageWidthPx = pageWidthPx,
                     loadImageBytes = loadImageBytes,
                     modifier = Modifier
                         .fillMaxSize()
@@ -400,6 +412,7 @@ private fun PagedPageContent(
     gap: Dp,
     placeholderHeightPx: Int,
     imageHeights: Map<String, Float>,
+    imageWidthPx: Int,
     loadImageBytes: suspend (String) -> ByteArray?,
     modifier: Modifier = Modifier
 ) {
@@ -414,6 +427,7 @@ private fun PagedPageContent(
                 styles = styles,
                 placeholderHeightPx = placeholderHeightPx,
                 imageHeights = imageHeights,
+                imageWidthPx = imageWidthPx,
                 loadImageBytes = loadImageBytes
             )
         }
@@ -430,6 +444,7 @@ private fun PageItemView(
     styles: EpubTypeStyles,
     placeholderHeightPx: Int,
     imageHeights: Map<String, Float>,
+    imageWidthPx: Int,
     loadImageBytes: suspend (String) -> ByteArray?
 ) {
     when (block) {
@@ -479,6 +494,7 @@ private fun PageItemView(
             resourcePath = block.resourcePath,
             contentDescription = block.contentDescription,
             heightPx = imageHeights[block.resourcePath] ?: placeholderHeightPx.toFloat(),
+            widthPx = imageWidthPx,
             loadImageBytes = loadImageBytes
         )
         is EpubBlock.PageNumber -> Text(
@@ -532,12 +548,19 @@ private fun PageImage(
     resourcePath: String,
     contentDescription: String?,
     heightPx: Float,
+    widthPx: Int,
     loadImageBytes: suspend (String) -> ByteArray?
 ) {
-    val bitmap = produceState<ImageBitmap?>(initialValue = null, resourcePath) {
+    val targetHeightPx = heightPx.roundToInt().coerceAtLeast(1)
+    val bitmap = produceState<ImageBitmap?>(
+        initialValue = null,
+        resourcePath,
+        widthPx,
+        targetHeightPx
+    ) {
         val bytes = loadImageBytes(resourcePath) ?: return@produceState
         value = withContext(Dispatchers.IO) {
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+            decodeEpubImage(bytes, widthPx, targetHeightPx)
         }
     }.value
     val height = with(LocalDensity.current) { heightPx.toDp() }
@@ -551,11 +574,51 @@ private fun PageImage(
             Image(
                 bitmap = bitmap,
                 contentDescription = contentDescription,
-                contentScale = ContentScale.FillBounds,
+                // A capped cover box must letterbox rather than stretch the
+                // artwork vertically when its natural aspect ratio is taller.
+                contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxSize()
             )
         }
     }
+}
+
+/**
+ * Android bitmap sampling uses powers of two. Decode only enough pixels for
+ * the fitted reader box rather than allocating the source cover at full size.
+ */
+internal fun epubImageSampleSize(
+    sourceWidth: Int,
+    sourceHeight: Int,
+    targetWidth: Int,
+    targetHeight: Int
+): Int {
+    if (sourceWidth <= 0 || sourceHeight <= 0) return 1
+    val requestedWidth = targetWidth.coerceAtLeast(1)
+    val requestedHeight = targetHeight.coerceAtLeast(1)
+    var sample = 1
+    while (
+        sourceWidth / (sample * 2) >= requestedWidth &&
+        sourceHeight / (sample * 2) >= requestedHeight
+    ) {
+        sample *= 2
+    }
+    return sample
+}
+
+private fun decodeEpubImage(bytes: ByteArray, targetWidth: Int, targetHeight: Int): ImageBitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+    val options = BitmapFactory.Options().apply {
+        inSampleSize = epubImageSampleSize(
+            sourceWidth = bounds.outWidth,
+            sourceHeight = bounds.outHeight,
+            targetWidth = targetWidth,
+            targetHeight = targetHeight
+        )
+    }
+    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)?.asImageBitmap()
 }
 
 @Composable

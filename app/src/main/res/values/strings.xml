@@ -29,11 +29,14 @@
     <string name="follow_spoken_text">Follow spoken text</string>
     <string name="follow_spoken_text_description">Keep the current sentence in view while playing.</string>
     <string name="voice">Voice</string>
-    <string name="no_offline_voices">No offline voices were found. Install a voice through the system settings.</string>
+    <string name="no_offline_voices">No installed offline voices were found. Install a voice through the system settings.</string>
     <string name="speech_rate">Speech rate: %1$sx</string>
     <string name="pitch">Pitch: %1$sx</string>
     <string name="preview_voice">Preview voice</string>
-    <string name="offline_voice_note">Orator uses an installed offline Android voice. Network voices are not selected.</string>
+    <string name="preview_voice_engine_unavailable">Android’s speech engine is unavailable. Try again or check your system speech settings.</string>
+    <string name="preview_voice_unavailable">That voice or language is not installed or cannot be used on this device. Check Android’s speech settings and try another voice.</string>
+    <string name="preview_voice_request_rejected">Android could not start the voice preview. Try another installed voice.</string>
+    <string name="offline_voice_note">Only installed offline Android voices appear here. Voices that still need downloading and network voices are not selectable.</string>
     <string name="install_voice_data">Install or configure voices</string>
     <string name="library_error_title">Library unavailable</string>
     <string name="library_error_body">Orator could not load your books.</string>
@@ -111,6 +114,10 @@
     <string name="save_note">Save note</string>
     <string name="note_saved">Note saved</string>
     <string name="note_save_failed">The note could not be saved.</string>
+    <string name="delete_note">Delete note</string>
+    <string name="delete_note_confirmation">Delete this note? Its voice recording, if any, will also be deleted.</string>
+    <string name="note_deleted">Note deleted</string>
+    <string name="note_delete_failed">The note could not be deleted. Try again.</string>
     <string name="no_book_notes">No notes for this book yet.</string>
     <string name="note_position">At %1$d%%</string>
     <string name="play_voice_note">Play voice note (%1$s)</string>

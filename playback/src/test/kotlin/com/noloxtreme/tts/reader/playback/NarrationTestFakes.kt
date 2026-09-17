@@ -45,7 +45,9 @@ internal class FakeSpeechEngine : SpeechEngine {
 
     override suspend fun availableOfflineVoices(): List<VoiceInfo> = offlineVoicesResult
 
-    override suspend fun speakPreview(text: String) = Unit
+    var previewResult = true
+
+    override suspend fun speakPreview(text: String): Boolean = previewResult
 
     fun emit(event: SpeechEvent) {
         eventBus.tryEmit(event)

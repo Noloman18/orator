@@ -94,6 +94,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -151,6 +152,7 @@ import com.noloxtreme.tts.reader.ui.EpubReaderPane
 import com.noloxtreme.tts.reader.ui.EpubTocSheet
 import com.noloxtreme.tts.reader.ui.lineHeightMultiplier
 import com.noloxtreme.tts.reader.ui.SettingsViewModel
+import com.noloxtreme.tts.reader.ui.VoicePreviewStatus
 import com.noloxtreme.tts.reader.ui.theme.OratorTheme
 import com.google.android.gms.ads.AdRequest
 import com.google.android.gms.ads.AdSize
@@ -168,8 +170,8 @@ private const val SETTINGS_ROUTE = "settings"
 private const val EXPORTS_ROUTE = "exports"
 private const val READER_ROUTE = "reader/{documentId}"
 private const val SPLASH_DURATION_MILLIS = 5_000L
-/** Production anchored adaptive banner unit for the Book Notes footer. */
-private const val NOTES_BANNER_AD_UNIT_ID = "ca-app-pub-1951746776607933/2591439047"
+/** Google's sample anchored adaptive banner unit, used until live-ad release testing begins. */
+private const val NOTES_BANNER_AD_UNIT_ID = "ca-app-pub-3940256099942544/9214589741"
 @Composable
 fun OratorApp(appViewModel: AppViewModel = hiltViewModel()) {
     val settings by appViewModel.settings.collectAsState()
@@ -602,6 +604,7 @@ private fun ReaderScreen(
     viewModel: ReaderViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
+    val hostView = LocalView.current
     val scope = rememberCoroutineScope()
     val document by viewModel.document.collectAsState()
     val loadState by viewModel.loadState.collectAsState()
@@ -638,6 +641,15 @@ private fun ReaderScreen(
     val totalCharacterCount = document?.totalCharacterCount ?: 0L
     val narrationPlaying = narration is NarrationState.Playing || narration is NarrationState.Preparing
     val playing = if (inReadMode) visualReading.isPlaying else narrationPlaying
+
+    // Silent Read Mode has no media session to keep the display awake. Keep it on
+    // only while its visual word pointer is moving, then restore the user's normal
+    // screen-timeout setting as soon as reading pauses, ends, or this screen closes.
+    DisposableEffect(hostView, inReadMode, visualReading.isPlaying) {
+        hostView.keepScreenOn = inReadMode && visualReading.isPlaying
+        onDispose { hostView.keepScreenOn = false }
+    }
+
     val playbackError = narration as? NarrationState.Error
     var followEnabled by remember { mutableStateOf(settings.followSpokenText) }
     var programmaticScroll by remember { mutableStateOf(false) }
@@ -715,10 +727,11 @@ private fun ReaderScreen(
         viewModel.noteMessages.collect { message ->
             exportSnackbar.showSnackbar(
                 context.getString(
-                    if (message is com.noloxtreme.tts.reader.ui.NoteMessage.Saved) {
-                        R.string.note_saved
-                    } else {
-                        R.string.note_save_failed
+                    when (message) {
+                        com.noloxtreme.tts.reader.ui.NoteMessage.Saved -> R.string.note_saved
+                        com.noloxtreme.tts.reader.ui.NoteMessage.Failed -> R.string.note_save_failed
+                        com.noloxtreme.tts.reader.ui.NoteMessage.Deleted -> R.string.note_deleted
+                        com.noloxtreme.tts.reader.ui.NoteMessage.DeleteFailed -> R.string.note_delete_failed
                     }
                 )
             )
@@ -787,6 +800,19 @@ private fun ReaderScreen(
         }
     }
 
+    // Generic text is a scrollable reader rather than packed EPUB pages. Store
+    // the first visible paragraph when the user reads manually, while Read
+    // Mode's moving word pointer is paused. Pointer-driven progress is saved by
+    // the view model at the exact word instead.
+    LaunchedEffect(inReadMode, isEpubReadMode, sectionTitle) {
+        if (!inReadMode || isEpubReadMode) return@LaunchedEffect
+        val contentStartIndex = if (sectionTitle != null) 1 else 0
+        snapshotFlow { listState.firstVisibleItemIndex }
+            .map { itemIndex -> (itemIndex - contentStartIndex).coerceAtLeast(0) }
+            .distinctUntilChanged()
+            .collect(viewModel::rememberVisibleReadParagraph)
+    }
+
     Scaffold(
         topBar = {
             if (!inReadMode || chromeVisible) {
@@ -836,6 +862,7 @@ private fun ReaderScreen(
                     playing = playing,
                     transport = transport,
                     reading = inReadMode,
+                    pagedReading = isEpubReadMode,
                     speechRate = settings.speechRate,
                     visualReadingPace = visualReading.pace,
                     visualReadingCompleted = visualReading.completed,
@@ -1077,6 +1104,7 @@ private fun ReaderScreen(
                 viewModel.goToNote(note.position)
                 showBookNotes = false
             },
+            onDeleteNote = viewModel::deleteNote,
             onDismiss = { showBookNotes = false }
         )
     }
@@ -1210,10 +1238,12 @@ private fun BookNotesDialog(
     notes: List<BookNote>,
     totalCharacterCount: Long,
     onOpenNote: (BookNote) -> Unit,
+    onDeleteNote: (BookNote) -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
     var playingNoteId by remember { mutableStateOf<String?>(null) }
+    var notePendingDeletion by remember { mutableStateOf<BookNote?>(null) }
     val voicePlayer = remember {
         VoiceNotePlayer { playingNoteId = null }
     }
@@ -1254,11 +1284,27 @@ private fun BookNotesDialog(
                                 modifier = Modifier.padding(14.dp),
                                 verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Text(
-                                    stringResource(R.string.note_position, progress),
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        stringResource(R.string.note_position, progress),
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    IconButton(onClick = {
+                                        voicePlayer.stop()
+                                        playingNoteId = null
+                                        notePendingDeletion = note
+                                    }) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Delete,
+                                            contentDescription = stringResource(R.string.delete_note)
+                                        )
+                                    }
+                                }
                                 note.text?.let { noteText ->
                                     Text(noteText, style = MaterialTheme.typography.bodyMedium)
                                 }
@@ -1311,6 +1357,25 @@ private fun BookNotesDialog(
             }
         }
     )
+
+    notePendingDeletion?.let { note ->
+        AlertDialog(
+            onDismissRequest = { notePendingDeletion = null },
+            title = { Text(stringResource(R.string.delete_note)) },
+            text = { Text(stringResource(R.string.delete_note_confirmation)) },
+            confirmButton = {
+                Button(onClick = {
+                    onDeleteNote(note)
+                    notePendingDeletion = null
+                }) { Text(stringResource(R.string.delete_note)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { notePendingDeletion = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -1387,6 +1452,7 @@ private fun ReaderControls(
     playing: Boolean,
     transport: ReaderTransport,
     reading: Boolean,
+    pagedReading: Boolean,
     speechRate: Float,
     visualReadingPace: Float,
     visualReadingCompleted: Boolean,
@@ -1417,6 +1483,7 @@ private fun ReaderControls(
                     contentDescription = stringResource(
                         when {
                             !reading -> R.string.previous_sentence
+                            pagedReading -> R.string.previous_page
                             else -> R.string.previous_word
                         }
                     )
@@ -1444,6 +1511,7 @@ private fun ReaderControls(
                     contentDescription = stringResource(
                         when {
                             !reading -> R.string.next_sentence
+                            pagedReading -> R.string.next_page
                             else -> R.string.next_word
                         }
                     )
@@ -1520,6 +1588,7 @@ private fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val settings by viewModel.settings.collectAsState()
+    val previewStatus by viewModel.previewStatus.collectAsState()
     Scaffold(
         topBar = {
             TopAppBar(
@@ -1535,7 +1604,7 @@ private fun SettingsScreen(
         ) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 22.dp, top = 18.dp, end = 22.dp, bottom = 96.dp),
+                contentPadding = PaddingValues(start = 22.dp, top = 18.dp, end = 22.dp, bottom = 136.dp),
                 verticalArrangement = Arrangement.spacedBy(22.dp)
             ) {
                 item {
@@ -1646,19 +1715,36 @@ private fun SettingsScreen(
                 tonalElevation = 3.dp,
                 shadowElevation = 8.dp
             ) {
-                OutlinedButton(
-                    onClick = viewModel::previewVoice,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 22.dp, vertical = 12.dp)
-                ) {
-                    Icon(Icons.Outlined.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text(stringResource(R.string.preview_voice))
+                Column {
+                    OutlinedButton(
+                        onClick = viewModel::previewVoice,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 22.dp, vertical = 12.dp)
+                    ) {
+                        Icon(Icons.Outlined.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.preview_voice))
+                    }
+                    previewStatus?.let { status ->
+                        Text(
+                            text = previewVoiceStatusMessage(status),
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(start = 22.dp, end = 22.dp, bottom = 12.dp)
+                        )
+                    }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun previewVoiceStatusMessage(status: VoicePreviewStatus): String = when (status) {
+    VoicePreviewStatus.ENGINE_UNAVAILABLE -> stringResource(R.string.preview_voice_engine_unavailable)
+    VoicePreviewStatus.VOICE_UNAVAILABLE -> stringResource(R.string.preview_voice_unavailable)
+    VoicePreviewStatus.REQUEST_REJECTED -> stringResource(R.string.preview_voice_request_rejected)
 }
 
 @Composable

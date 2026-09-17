@@ -167,4 +167,7 @@ interface BookNoteDao {
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(note: BookNoteEntity)
+
+    @Query("DELETE FROM book_notes WHERE id = :noteId")
+    suspend fun deleteById(noteId: String): Int
 }

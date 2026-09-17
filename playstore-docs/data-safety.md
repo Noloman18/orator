@@ -2,8 +2,8 @@
 
 This is source material for the Play Console Data safety form, not a replacement for
 the form. It must be completed for the exact AAB submitted. The current source
-includes the Google Mobile Ads SDK with production app and banner identifiers, so
-the former no-data answer below is no longer valid.
+uses Google's sample Mobile Ads identifiers for test-device installs. Before a
+production submission, switch to the live identifiers and use the guidance below.
 
 ## Current live-ad build: review required before submission
 

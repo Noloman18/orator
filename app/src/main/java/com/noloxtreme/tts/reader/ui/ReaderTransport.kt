@@ -3,7 +3,8 @@ package com.noloxtreme.tts.reader.ui
 /**
  * Strategy for the reader transport buttons. The active strategy is selected
  * by [ReaderViewModel] from the current mode: [NarrationTransport] while
- * listening to the book, and [VisualReadingTransport] in silent Read Mode.
+ * listening to the book, [VisualReadingTransport] for generic silent reading,
+ * and [PagedReadingTransport] for EPUB silent reading.
  */
 interface ReaderTransport {
     fun previous()
@@ -30,6 +31,17 @@ class VisualReadingTransport(
 ) : ReaderTransport {
     override fun previous() = previousWordAction()
     override fun next() = nextWordAction()
+    override fun increaseSpeed() = increasePaceAction()
+}
+
+/** EPUB Read Mode: skip buttons turn pages while the rate button changes pace. */
+class PagedReadingTransport(
+    private val previousPageAction: () -> Unit,
+    private val nextPageAction: () -> Unit,
+    private val increasePaceAction: () -> Unit
+) : ReaderTransport {
+    override fun previous() = previousPageAction()
+    override fun next() = nextPageAction()
     override fun increaseSpeed() = increasePaceAction()
 }
 

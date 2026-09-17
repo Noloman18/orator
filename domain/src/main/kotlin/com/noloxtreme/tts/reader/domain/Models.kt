@@ -276,6 +276,8 @@ interface ReaderPositionRepository {
 interface BookNoteRepository {
     fun observeNotes(documentId: DocumentId): Flow<List<BookNote>>
     suspend fun save(note: BookNote)
+    /** Removes one note. Its optional private voice file is owned by the reader layer. */
+    suspend fun delete(noteId: String): Boolean
 }
 
 interface SettingsRepository {

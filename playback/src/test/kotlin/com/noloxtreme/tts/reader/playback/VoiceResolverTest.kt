@@ -7,8 +7,12 @@ import org.junit.Test
 
 class VoiceResolverTest {
 
-    private fun voice(name: String, tag: String, network: Boolean = false) =
-        VoiceInfo(name, tag, network)
+    private fun voice(
+        name: String,
+        tag: String,
+        network: Boolean = false,
+        installed: Boolean = true
+    ) = VoiceInfo(name, tag, network, installed)
 
     private val voices = listOf(
         voice("network-en", "en-US", network = true),
@@ -25,6 +29,15 @@ class VoiceResolverTest {
 
         assertEquals(listOf("eng-gb", "eng-us", "eng-us-2", "fra", "zulu"), offline.map { it.name })
         assertTrue(offline.none { it.name == "network-en" })
+    }
+
+    @Test
+    fun offlineVoicesExcludesVoicesWhoseDataIsNotInstalled() {
+        val offline = VoiceResolver.offlineVoices(
+            voices + voice("arabic-downloading", "ar-SA", installed = false)
+        )
+
+        assertTrue(offline.none { it.name == "arabic-downloading" })
     }
 
     @Test

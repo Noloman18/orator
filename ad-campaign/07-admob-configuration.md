@@ -6,28 +6,30 @@ privacy-policy content, or in-app user-facing text.
 AdMob application and ad-unit IDs are identifiers rather than credentials; never
 place an AdMob account password, API key, or service-account file in this repository.
 
-## Current production configuration
+## Current test-device configuration
 
-The release configuration uses these live Book Notes footer identifiers:
-
-- App ID: `ca-app-pub-1951746776607933~4729235966`
-- Banner unit ID: `ca-app-pub-1951746776607933/2591439047`
-
-## Development and QA configuration
-
-Use Google's sample identifiers for any future development or QA build. Do not
-generate artificial impressions or clicks on the production banner.
+The app is currently configured with Google's sample identifiers. Use this build on
+test devices only; it does not request the live Book Notes banner.
 
 - Test app ID: `ca-app-pub-3940256099942544~3347511713`
 - Test anchored adaptive banner unit ID: `ca-app-pub-3940256099942544/9214589741`
+
+## Live identifiers — switch only for a production-ready bundle
+
+Do not use these identifiers on development or QA devices, and never generate
+artificial impressions or clicks on the production banner.
+
+- App ID: `ca-app-pub-1951746776607933~4729235966`
+- Banner unit ID: `ca-app-pub-1951746776607933/2591439047`
 
 ## Before publishing the live-ad bundle
 
 1. Configure the European regulations message in AdMob Privacy & messaging, then
    integrate and test Google UMP consent collection and a persistent privacy-options
    entry point in the app. Do not publish the live-ad bundle before this is complete.
-2. Keep test IDs in all development and QA builds; do not generate artificial
-   impressions or clicks on the production banner.
+2. Replace both identifiers above with the live IDs only in the release-ready
+   source, then build and test that exact bundle. Keep test IDs in all development
+   and QA builds.
 3. Review the
    [privacy policy](../playstore-docs/privacy-policy.md) and
    [Data safety worksheet](../playstore-docs/data-safety.md) against the exact

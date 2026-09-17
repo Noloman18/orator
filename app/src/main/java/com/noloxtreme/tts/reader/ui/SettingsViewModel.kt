@@ -21,10 +21,17 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 private const val PREVIEW_SENTENCE = "The quick brown fox jumps over the lazy dog."
+
+enum class VoicePreviewStatus {
+    ENGINE_UNAVAILABLE,
+    VOICE_UNAVAILABLE,
+    REQUEST_REJECTED
+}
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
@@ -35,15 +42,31 @@ class SettingsViewModel @Inject constructor(
     private val speechEngine: SpeechEngine,
     private val narrationController: NarrationController
 ) : ViewModel() {
-    val settings: StateFlow<OratorSettings> = observeSettings.execute()
+    private val settingsSource = observeSettings.execute()
+
+    val settings: StateFlow<OratorSettings> = settingsSource
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), OratorSettings())
 
     private val mutableVoices = MutableStateFlow<List<VoiceInfo>>(emptyList())
     val voices: StateFlow<List<VoiceInfo>> = mutableVoices.asStateFlow()
 
+    private val mutablePreviewStatus = MutableStateFlow<VoicePreviewStatus?>(null)
+    val previewStatus: StateFlow<VoicePreviewStatus?> = mutablePreviewStatus.asStateFlow()
+
     init {
         viewModelScope.launch {
-            mutableVoices.value = speechEngine.availableOfflineVoices()
+            val installedVoices = speechEngine.availableOfflineVoices()
+            mutableVoices.value = installedVoices
+            val savedVoice = settingsSource.first().voiceName
+            // A previously saved voice can disappear when its Android voice data is
+            // removed. Revert to automatic selection rather than leaving narration
+            // unable to start.
+            if (savedVoice != null && installedVoices.isNotEmpty() &&
+                installedVoices.none { it.name == savedVoice }
+            ) {
+                updateSpeechSettings.clearVoice()
+                mutablePreviewStatus.value = VoicePreviewStatus.VOICE_UNAVAILABLE
+            }
         }
     }
 
@@ -57,8 +80,12 @@ class SettingsViewModel @Inject constructor(
 
     fun setVoice(name: String?) {
         viewModelScope.launch {
-            if (name == null) updateSpeechSettings.clearVoice()
-            else updateSpeechSettings.execute(voiceName = name)
+            mutablePreviewStatus.value = null
+            if (name == null) {
+                updateSpeechSettings.clearVoice()
+            } else if (mutableVoices.value.any { it.name == name }) {
+                updateSpeechSettings.execute(voiceName = name)
+            }
         }
     }
 
@@ -80,6 +107,7 @@ class SettingsViewModel @Inject constructor(
 
     fun previewVoice() {
         viewModelScope.launch {
+            mutablePreviewStatus.value = null
             if (narrationController.state.value is NarrationState.Playing ||
                 narrationController.state.value is NarrationState.Preparing
             ) {
@@ -94,8 +122,19 @@ class SettingsViewModel @Inject constructor(
                     pitch = current.speechPitch
                 )
             )
-            if (initialized == SpeechInitialization.Ready) {
-                speechEngine.speakPreview(PREVIEW_SENTENCE)
+            when (initialized) {
+                SpeechInitialization.Ready -> {
+                    if (!speechEngine.speakPreview(PREVIEW_SENTENCE)) {
+                        mutablePreviewStatus.value = VoicePreviewStatus.REQUEST_REJECTED
+                    }
+                }
+                SpeechInitialization.EngineUnavailable -> {
+                    mutablePreviewStatus.value = VoicePreviewStatus.ENGINE_UNAVAILABLE
+                }
+                SpeechInitialization.LanguageUnavailable -> {
+                    mutablePreviewStatus.value = VoicePreviewStatus.VOICE_UNAVAILABLE
+                    if (current.voiceName != null) updateSpeechSettings.clearVoice()
+                }
             }
         }
     }

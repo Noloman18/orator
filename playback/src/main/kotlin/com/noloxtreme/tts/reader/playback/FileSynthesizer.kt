@@ -48,15 +48,21 @@ class AndroidTtsFileSynthesizer @Inject constructor(
         if (initializationStatus != TextToSpeech.SUCCESS) {
             return SpeechInitialization.EngineUnavailable
         }
-        val locale = localeFor(configuration.languageTag)
-        val languageStatus = tts.setLanguage(locale)
-        if (languageStatus == TextToSpeech.LANG_MISSING_DATA ||
-            languageStatus == TextToSpeech.LANG_NOT_SUPPORTED
-        ) {
-            return SpeechInitialization.LanguageUnavailable
+        initialized = false
+        val selectedVoice = findInstalledOfflineVoice(tts, configuration)
+        if (selectedVoice != null) {
+            if (tts.setVoice(selectedVoice) != TextToSpeech.SUCCESS) {
+                return SpeechInitialization.LanguageUnavailable
+            }
+        } else {
+            val languageStatus = tts.setLanguage(localeFor(configuration.languageTag))
+            if (languageStatus == TextToSpeech.LANG_MISSING_DATA ||
+                languageStatus == TextToSpeech.LANG_NOT_SUPPORTED
+            ) {
+                return SpeechInitialization.LanguageUnavailable
+            }
         }
-        selectOfflineVoice(tts, configuration.voiceName, locale)
-        if (tts.voice?.isNetworkConnectionRequired == true) {
+        if (tts.voice?.isUsableOffline() != true) {
             return SpeechInitialization.LanguageUnavailable
         }
         tts.setSpeechRate(configuration.rate.coerceIn(0.5f, 2.0f))
@@ -137,32 +143,36 @@ class AndroidTtsFileSynthesizer @Inject constructor(
         engine
     }
 
-    private fun selectOfflineVoice(
+    private fun findInstalledOfflineVoice(
         tts: TextToSpeech,
-        requestedName: String?,
-        locale: Locale
-    ) {
+        configuration: SpeechConfiguration
+    ) = run {
         val voices = tts.voices.orEmpty()
         val selected = VoiceResolver.select(
             voices = voices.map { voice ->
                 VoiceInfo(
                     name = voice.name,
                     localeLanguageTag = voice.locale.toLanguageTag(),
-                    networkRequired = voice.isNetworkConnectionRequired
+                    networkRequired = voice.isNetworkConnectionRequired,
+                    installed = voice.isInstalled()
                 )
             },
-            requestedName = requestedName,
-            languageTag = locale.toLanguageTag()
+            requestedName = configuration.voiceName,
+            languageTag = configuration.languageTag
         )
-        if (selected != null) {
-            tts.voice = voices.firstOrNull { it.name == selected.name }
-        }
+        selected?.let { selection -> voices.firstOrNull { it.name == selection.name } }
     }
 
     private fun localeFor(languageTag: String?): Locale =
         languageTag?.takeIf { it.isNotBlank() }?.let(Locale::forLanguageTag)
             ?.takeUnless { it.language.isBlank() }
             ?: Locale.getDefault()
+
+    private fun android.speech.tts.Voice.isInstalled(): Boolean =
+        TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED !in features
+
+    private fun android.speech.tts.Voice.isUsableOffline(): Boolean =
+        !isNetworkConnectionRequired && isInstalled()
 
     private companion object {
         const val INITIALIZATION_TIMEOUT_MS = 5_000L

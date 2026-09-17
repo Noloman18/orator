@@ -41,6 +41,25 @@ class ReaderTransportTest {
     }
 
     @Test
+    fun pagedReadingTransportForwardsToPageAndPaceActions() {
+        val calls = mutableListOf<String>()
+        val transport = PagedReadingTransport(
+            previousPageAction = { calls += "previousPage" },
+            nextPageAction = { calls += "nextPage" },
+            increasePaceAction = { calls += "increasePace" }
+        )
+
+        transport.previous()
+        transport.next()
+        transport.increaseSpeed()
+
+        assertEquals(
+            listOf("previousPage", "nextPage", "increasePace"),
+            calls
+        )
+    }
+
+    @Test
     fun nextPageAdvanceReturnsTheNextPageWithinTheChapter() {
         assertEquals(PageTurnAdvance.ToPage(4), nextPageAdvance(currentPage = 3, pageCount = 10))
         assertEquals(PageTurnAdvance.ToPage(1), nextPageAdvance(currentPage = 0, pageCount = 10))

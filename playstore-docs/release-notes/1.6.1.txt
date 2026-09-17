@@ -6,3 +6,5 @@ What's new in this release:
 - Add text or voice notes at your current place in a book, then return to that passage later
 - The Book Notes screen now includes a small footer advertisement to help support Orator
 - Importing is limited to supported TXT, Markdown, EPUB, and PDF books up to 4 MB
+- The release build is now smaller and more efficient, with optimized code and splash artwork
+- EPUB Read Mode now turns pages reliably from the cover, preserves cover artwork, and uses less memory for book images

@@ -37,6 +37,32 @@ class EpubPaginationTest {
 
     private val gap = 10f
 
+    @Test
+    fun imageSamplingBoundsLargeCoversToTheirReaderBox() {
+        assertEquals(
+            4,
+            epubImageSampleSize(
+                sourceWidth = 4_000,
+                sourceHeight = 6_000,
+                targetWidth = 1_000,
+                targetHeight = 1_500
+            )
+        )
+    }
+
+    @Test
+    fun imageSamplingDoesNotUpscaleSmallImages() {
+        assertEquals(
+            1,
+            epubImageSampleSize(
+                sourceWidth = 800,
+                sourceHeight = 1_200,
+                targetWidth = 1_000,
+                targetHeight = 1_500
+            )
+        )
+    }
+
     // ------------------------------------------------------------------
     // Page text anchor
     // ------------------------------------------------------------------

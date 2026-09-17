@@ -21,7 +21,8 @@
       verification.
 - [ ] Complete the category, target audience, content-rating questionnaire, and
       Data safety form.
-- [x] Production Google Mobile Ads app and banner identifiers are configured.
+- [ ] Replace the sample Google Mobile Ads app and banner identifiers with the
+      production identifiers for the final release bundle.
 - [ ] Configure and test the UMP consent and privacy-options flow, then re-check the
       store listing, privacy policy, and Data safety answers before publishing live ads.
 - [ ] Enrol in Google Play App Signing and keep the upload keystore and passwords

@@ -190,6 +190,8 @@ class RoomBookNoteRepository @Inject constructor(
     override suspend fun save(note: BookNote) {
         dao.insert(note.toEntity())
     }
+
+    override suspend fun delete(noteId: String): Boolean = dao.deleteById(noteId) > 0
 }
 
 @Singleton

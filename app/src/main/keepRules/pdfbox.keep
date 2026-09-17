@@ -1,0 +1,4 @@
+# Android PdfBox's JPX filter references an optional JPEG-2000 decoder that is
+# not included in the app. Normal PDF import does not use it; suppress only the
+# missing optional type so R8 can optimize the release build.
+-dontwarn com.gemalto.jp2.JP2Decoder

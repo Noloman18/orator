@@ -5,7 +5,9 @@ import java.util.Locale
 data class VoiceInfo(
     val name: String,
     val localeLanguageTag: String,
-    val networkRequired: Boolean
+    val networkRequired: Boolean,
+    /** False when Android reports that the voice data has not finished downloading. */
+    val installed: Boolean = true
 )
 
 /**
@@ -14,12 +16,12 @@ data class VoiceInfo(
 object VoiceResolver {
 
     fun offlineVoices(voices: List<VoiceInfo>): List<VoiceInfo> =
-        voices.filter { !it.networkRequired }.sortedBy { it.name }
+        voices.filter { !it.networkRequired && it.installed }.sortedBy { it.name }
 
     /**
      * 1. Requested voice when installed and offline-capable.
-     * 2. First offline voice whose locale exactly matches the document language tag.
-     * 3. First offline voice with the same ISO language.
+     * 2. First installed offline voice whose locale exactly matches the document language tag.
+     * 3. First installed offline voice with the same ISO language.
      * 4. Otherwise null (caller falls back to the engine default when offline-capable).
      */
     fun select(

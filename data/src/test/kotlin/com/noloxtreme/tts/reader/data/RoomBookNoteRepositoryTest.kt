@@ -6,6 +6,7 @@ import com.noloxtreme.tts.reader.domain.DocumentPosition
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -51,6 +52,20 @@ class RoomBookNoteRepositoryTest : RoomDatabaseTest() {
         database.documentDao().deleteById("doc-1")
 
         assertTrue(repository.observeNotes(DocumentId("doc-1")).first().isEmpty())
+    }
+
+    @Test
+    fun deletesOnlyTheRequestedNote() = runBlocking {
+        repository.save(note(id = "keep", createdAt = 1L))
+        repository.save(note(id = "remove", createdAt = 2L))
+
+        assertTrue(repository.delete("remove"))
+        assertFalse(repository.delete("missing"))
+
+        assertEquals(
+            listOf("keep"),
+            repository.observeNotes(DocumentId("doc-1")).first().map { it.id }
+        )
     }
 
     private fun document() = DocumentEntity(

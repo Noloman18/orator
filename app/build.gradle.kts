@@ -48,7 +48,10 @@ android {
     buildTypes {
         release {
             optimization {
-                enable = false
+                // R8 shrinks, optimizes, and obfuscates the distributable build.
+                // Keep this off only for debug builds, where readable stack traces
+                // are more useful than a small artifact.
+                enable = true
             }
             if (keystoreConfigured) {
                 signingConfig = signingConfigs.create("release").apply {
