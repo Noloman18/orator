@@ -1,17 +1,11 @@
 package com.noloxtreme.tts.reader.ui
 
 import android.graphics.BitmapFactory
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -25,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -34,16 +29,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.State
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
@@ -56,9 +45,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.noloxtreme.tts.reader.R
@@ -70,9 +57,9 @@ import com.noloxtreme.tts.reader.domain.EpubTocEntry
 import com.noloxtreme.tts.reader.domain.LineHeightPreference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlin.math.roundToInt
+import kotlinx.coroutines.flow.distinctUntilChanged
 
-/** Page geometry constants shared by the paged reader and its text measurer. */
+/** Reader geometry shared by the EPUB renderer and its text styles. */
 internal val PageTopPadding = 12.dp
 internal val PageBottomPadding = 16.dp
 internal val QuoteStartPadding = 14.dp
@@ -83,14 +70,6 @@ internal val DividerThickness = 1.dp
 internal val DividerVerticalPadding = 10.dp
 
 private val ImagePlaceholderHeight = 150.dp
-private const val IMAGE_MAX_PAGE_FRACTION = 0.7f
-
-/** A stable page snapshot so an outgoing page never indexes a newer page list. */
-private data class RenderedPage(
-    val pages: List<Page>,
-    val index: Int
-)
-
 /** Maps the shared line-spacing preference to a multiplier, reused by both reader panes. */
 internal fun lineHeightMultiplier(preference: LineHeightPreference): Float = when (preference) {
     LineHeightPreference.COMPACT -> 1.35f
@@ -98,14 +77,14 @@ internal fun lineHeightMultiplier(preference: LineHeightPreference): Float = whe
     LineHeightPreference.SPACIOUS -> 1.8f
 }
 
-/** The Material text styles shared by the paged reader and its measurer. */
+/** The Material text styles shared by EPUB blocks. */
 internal data class EpubTypeStyles(
     val body: TextStyle,
     val heading: TextStyle,
     val label: TextStyle
 )
 
-/** The rendered style of a block; the pagination measurer applies the same styles. */
+/** The rendered style of an EPUB block. */
 internal fun epubBlockStyle(
     block: EpubBlock,
     fontSizeSp: Int,
@@ -140,7 +119,7 @@ private val EpubBlock.runs: List<EpubRun>
         else -> emptyList()
     }
 
-/** The styled text of a text block, sliced to a page fragment when provided. */
+/** The styled text of a text block, optionally highlighting the active read unit. */
 internal fun EpubBlock.slicedText(
     slice: PageItem.TextSlice?,
     activeWord: PageTextRange? = null
@@ -168,13 +147,10 @@ internal fun EpubBlock.slicedText(
 }
 
 /**
- * Kindle-style visual rendering of one EPUB spine item: the chapter's blocks
- * are measured and packed into fixed pages that fill the viewport, and the
- * reader flips between them (tap the left/right edges, drag horizontally, or
- * use the transport's fast buttons). The page index is owned by the caller:
- * this pane reports page-turn requests and the measured page count through
- * [onNextPage], [onPreviousPage] and [onPageCountChange]. Read Mode controls
- * stay below this pane; only the middle content area is replaced.
+ * Scrollable visual rendering of one EPUB spine item. It uses the same
+ * continuous vertical reading interaction as narration mode while preserving
+ * EPUB inline styling, lists, page labels, and images. A narration/read-mode
+ * position is mapped to a block so the list can bring it into view.
  */
 @Composable
 fun EpubReaderPane(
@@ -182,14 +158,10 @@ fun EpubReaderPane(
     unavailable: Boolean,
     fontSizeSp: Int,
     lineHeight: LineHeightPreference,
-    chromeVisible: Boolean,
-    pageIndex: Int,
     jumpTarget: PageTextAnchor?,
     activeWord: PageTextRange? = null,
-    onNextPage: () -> Unit,
-    onPreviousPage: () -> Unit,
-    onPageCountChange: (spineIndex: Int, count: Int) -> Unit,
-    onJumpTargetResolved: (Int) -> Unit,
+    onJumpTargetResolved: () -> Unit,
+    onVisibleBlockChanged: (Int) -> Unit,
     onRetry: () -> Unit,
     onToggleChrome: () -> Unit,
     loadImageBytes: suspend (String) -> ByteArray?,
@@ -204,19 +176,15 @@ fun EpubReaderPane(
             ) {
                 CircularProgressIndicator()
             }
-            else -> PagedChapterView(
+            else -> ScrollableChapterView(
                 spineIndex = spineContent.spineIndex,
                 blocks = spineContent.blocks,
                 fontSizeSp = fontSizeSp,
                 lineHeight = lineHeight,
-                chromeVisible = chromeVisible,
-                pageIndex = pageIndex,
                 jumpTarget = jumpTarget,
                 activeWord = activeWord,
-                onNextPage = onNextPage,
-                onPreviousPage = onPreviousPage,
-                onPageCountChange = onPageCountChange,
                 onJumpTargetResolved = onJumpTargetResolved,
+                onVisibleBlockChanged = onVisibleBlockChanged,
                 onToggleChrome = onToggleChrome,
                 loadImageBytes = loadImageBytes
             )
@@ -225,240 +193,105 @@ fun EpubReaderPane(
 }
 
 @Composable
-private fun PagedChapterView(
+private fun ScrollableChapterView(
     spineIndex: Int,
     blocks: List<EpubBlock>,
     fontSizeSp: Int,
     lineHeight: LineHeightPreference,
-    chromeVisible: Boolean,
-    pageIndex: Int,
     jumpTarget: PageTextAnchor?,
     activeWord: PageTextRange?,
-    onNextPage: () -> Unit,
-    onPreviousPage: () -> Unit,
-    onPageCountChange: (spineIndex: Int, count: Int) -> Unit,
-    onJumpTargetResolved: (Int) -> Unit,
+    onJumpTargetResolved: () -> Unit,
+    onVisibleBlockChanged: (Int) -> Unit,
     onToggleChrome: () -> Unit,
     loadImageBytes: suspend (String) -> ByteArray?
 ) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val density = LocalDensity.current
-        val pageWidthPx = with(density) {
+        val contentWidthPx = with(density) {
             (maxWidth - OratorDesignTokens.readerHorizontalPadding * 2).roundToPx()
         }
-        val pageHeightPx = with(density) {
-            (maxHeight - PageTopPadding - PageBottomPadding).roundToPx()
-        }
-        val textMeasurer = rememberTextMeasurer(cacheSize = 64)
         val styles = EpubTypeStyles(
             body = MaterialTheme.typography.bodyLarge,
             heading = MaterialTheme.typography.headlineSmall,
             label = MaterialTheme.typography.labelMedium
         )
-        val placeholderHeightPx = with(density) {
-            minOf(
-                ImagePlaceholderHeight.roundToPx(),
-                (pageHeightPx * IMAGE_MAX_PAGE_FRACTION).roundToInt()
-            )
-        }
-        val imageHeights by rememberFittedImageHeights(blocks, pageWidthPx, pageHeightPx, loadImageBytes)
-        val measurer = remember(
-            textMeasurer, density, pageWidthPx, fontSizeSp, lineHeight, imageHeights, styles,
-            placeholderHeightPx
-        ) {
-            ComposeBlockMeasurer(
-                textMeasurer = textMeasurer,
-                density = density,
-                pageWidthPx = pageWidthPx,
-                fontSizeSp = fontSizeSp,
-                lineHeight = lineHeight,
-                styles = styles,
-                imageHeightsPx = imageHeights,
-                placeholderImageHeightPx = placeholderHeightPx
-            )
-        }
-        val gapPx = with(density) {
-            OratorDesignTokens.readerParagraphGap.roundToPx().toFloat()
-        }
-        val pages = remember(blocks, pageWidthPx, pageHeightPx, fontSizeSp, lineHeight, imageHeights, styles) {
-            EpubPagination.paginate(blocks, pageHeightPx.toFloat(), gapPx, measurer)
-        }
-        LaunchedEffect(spineIndex, pages.size) {
-            onPageCountChange(spineIndex, pages.size)
-        }
-        val lastPageIndex = (pages.size - 1).coerceAtLeast(0)
-        val safePageIndex = pageIndex.coerceIn(0, lastPageIndex)
-        // A pending narration jump lands directly on its page for the first
-        // frame, then reports the resolved index so the caller owns it.
-        val jumpPage = jumpTarget?.let { target ->
-            pageContaining(pages, target.blockIndex, target.charStart).takeIf { it >= 0 }
-        }
-        val effectivePageIndex = jumpPage ?: safePageIndex
-        LaunchedEffect(jumpPage) {
-            if (jumpPage != null) onJumpTargetResolved(jumpPage)
-        }
-        if (pages.isEmpty()) return@BoxWithConstraints
+        val listState = rememberLazyListState()
 
-        // Gesture closures must always see the latest callbacks even though
-        // the gesture detectors attach only once.
-        val nextPage by rememberUpdatedState(onNextPage)
-        val previousPage by rememberUpdatedState(onPreviousPage)
-        val toggleChrome by rememberUpdatedState(onToggleChrome)
-
-        val renderedPage = remember(pages, effectivePageIndex) {
-            RenderedPage(pages = pages, index = effectivePageIndex)
+        LaunchedEffect(spineIndex, jumpTarget) {
+            val target = jumpTarget ?: return@LaunchedEffect
+            if (blocks.isNotEmpty()) {
+                listState.scrollToItem(target.blockIndex.coerceIn(0, blocks.lastIndex))
+            }
+            onJumpTargetResolved()
         }
+        LaunchedEffect(spineIndex, activeWord?.blockIndex) {
+            val blockIndex = activeWord?.blockIndex ?: return@LaunchedEffect
+            if (blocks.isNotEmpty()) {
+                listState.animateScrollToItem(blockIndex.coerceIn(0, blocks.lastIndex))
+            }
+        }
+        LaunchedEffect(listState, spineIndex) {
+            snapshotFlow { listState.firstVisibleItemIndex }
+                .distinctUntilChanged()
+                .collect(onVisibleBlockChanged)
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .clipToBounds()
                 .pointerInput(Unit) {
-                    detectTapGestures { offset ->
-                        when (PageTurnGestures.tapZone(offset.x, size.width.toFloat())) {
-                            TapZone.PREVIOUS -> previousPage()
-                            TapZone.NEXT -> nextPage()
-                            TapZone.TOGGLE_CHROME -> toggleChrome()
-                        }
-                    }
-                }
-                .pointerInput(Unit) {
-                    var dragDistance = 0f
-                    detectHorizontalDragGestures(
-                        onDragStart = { dragDistance = 0f },
-                        onHorizontalDrag = { change, dragAmount ->
-                            change.consume()
-                            dragDistance += dragAmount
-                        },
-                        onDragEnd = {
-                            when (PageTurnGestures.dragDirection(dragDistance, size.width.toFloat())) {
-                                PageTurnDirection.FORWARD -> nextPage()
-                                PageTurnDirection.BACKWARD -> previousPage()
-                                null -> Unit
-                            }
-                        }
-                    )
+                    detectTapGestures(onTap = { onToggleChrome() })
                 }
         ) {
-            AnimatedContent(
-                targetState = renderedPage,
+            LazyColumn(
+                state = listState,
                 modifier = Modifier.fillMaxSize(),
-                transitionSpec = {
-                    val forward = targetState.index > initialState.index
-                    if (forward) {
-                        (slideInHorizontally { it } + fadeIn()) togetherWith
-                            (slideOutHorizontally { -it } + fadeOut())
-                    } else {
-                        (slideInHorizontally { -it } + fadeIn()) togetherWith
-                            (slideOutHorizontally { it } + fadeOut())
-                    }
-                },
-                label = "epubPageTurn"
-            ) { rendered ->
-                PagedPageContent(
-                    blocks = blocks,
-                    page = rendered.pages[rendered.index],
-                    activeWord = activeWord,
-                    fontSizeSp = fontSizeSp,
-                    lineHeight = lineHeight,
-                    styles = styles,
-                    gap = OratorDesignTokens.readerParagraphGap,
-                    placeholderHeightPx = placeholderHeightPx,
-                    imageHeights = imageHeights,
-                    imageWidthPx = pageWidthPx,
-                    loadImageBytes = loadImageBytes,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(
-                            start = OratorDesignTokens.readerHorizontalPadding,
-                            end = OratorDesignTokens.readerHorizontalPadding,
-                            top = PageTopPadding,
-                            bottom = PageBottomPadding
-                        )
-                )
-            }
-            if (chromeVisible) {
-                val label = remember(pages, effectivePageIndex) {
-                    nearestPrintedPageLabel(pages[effectivePageIndex], blocks)
+                contentPadding = PaddingValues(
+                    start = OratorDesignTokens.readerHorizontalPadding,
+                    end = OratorDesignTokens.readerHorizontalPadding,
+                    top = PageTopPadding,
+                    bottom = PageBottomPadding
+                ),
+                verticalArrangement = Arrangement.spacedBy(OratorDesignTokens.readerParagraphGap)
+            ) {
+                itemsIndexed(blocks, key = { index, _ -> "epub-$spineIndex-$index" }) { index, block ->
+                    EpubBlockView(
+                        block = block,
+                        activeWord = activeWord?.takeIf { it.blockIndex == index },
+                        fontSizeSp = fontSizeSp,
+                        lineHeight = lineHeight,
+                        styles = styles,
+                        imageWidthPx = contentWidthPx,
+                        loadImageBytes = loadImageBytes
+                    )
                 }
-                Text(
-                    text = label?.let {
-                        stringResource(
-                            R.string.read_mode_page_position_with_label,
-                            it,
-                            effectivePageIndex + 1,
-                            pages.size
-                        )
-                    } ?: stringResource(R.string.read_mode_page_position, effectivePageIndex + 1, pages.size),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 6.dp)
-                )
             }
         }
     }
 }
 
-/** Renders one page: the block fragments it was packed with, in order. */
 @Composable
-private fun PagedPageContent(
-    blocks: List<EpubBlock>,
-    page: Page,
-    activeWord: PageTextRange?,
-    fontSizeSp: Int,
-    lineHeight: LineHeightPreference,
-    styles: EpubTypeStyles,
-    gap: Dp,
-    placeholderHeightPx: Int,
-    imageHeights: Map<String, Float>,
-    imageWidthPx: Int,
-    loadImageBytes: suspend (String) -> ByteArray?,
-    modifier: Modifier = Modifier
-) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(gap)) {
-        page.items.forEach { item ->
-            PageItemView(
-                block = blocks[item.blockIndex],
-                slice = item as? PageItem.TextSlice,
-                activeWord = activeWord?.takeIf { it.blockIndex == item.blockIndex },
-                fontSizeSp = fontSizeSp,
-                lineHeight = lineHeight,
-                styles = styles,
-                placeholderHeightPx = placeholderHeightPx,
-                imageHeights = imageHeights,
-                imageWidthPx = imageWidthPx,
-                loadImageBytes = loadImageBytes
-            )
-        }
-    }
-}
-
-@Composable
-private fun PageItemView(
+private fun EpubBlockView(
     block: EpubBlock,
-    slice: PageItem.TextSlice?,
     activeWord: PageTextRange?,
     fontSizeSp: Int,
     lineHeight: LineHeightPreference,
     styles: EpubTypeStyles,
-    placeholderHeightPx: Int,
-    imageHeights: Map<String, Float>,
     imageWidthPx: Int,
     loadImageBytes: suspend (String) -> ByteArray?
 ) {
     when (block) {
         is EpubBlock.Heading -> Text(
-            text = block.slicedText(slice, activeWord),
+            text = block.slicedText(slice = null, activeWord = activeWord),
             style = epubBlockStyle(block, fontSizeSp, lineHeight, styles),
             color = MaterialTheme.colorScheme.onSurface
         )
         is EpubBlock.Paragraph -> Text(
-            text = block.slicedText(slice, activeWord),
+            text = block.slicedText(slice = null, activeWord = activeWord),
             style = epubBlockStyle(block, fontSizeSp, lineHeight, styles)
         )
         is EpubBlock.Quote -> Text(
-            text = block.slicedText(slice, activeWord),
+            text = block.slicedText(slice = null, activeWord = activeWord),
             style = epubBlockStyle(block, fontSizeSp, lineHeight, styles),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
@@ -466,34 +299,22 @@ private fun PageItemView(
                 .padding(start = QuoteStartPadding, end = QuoteEndPadding)
         )
         is EpubBlock.ListItem -> {
-            val startsAtBlockStart = slice == null || slice.charStart == 0
-            if (startsAtBlockStart) {
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = block.marker,
-                        style = epubBlockStyle(block, fontSizeSp, lineHeight, styles),
-                        modifier = Modifier.width(ListMarkerWidth)
-                    )
-                    Text(
-                        text = block.slicedText(slice, activeWord),
-                        style = epubBlockStyle(block, fontSizeSp, lineHeight, styles),
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            } else {
+            Row(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = block.slicedText(slice, activeWord),
+                    text = block.marker,
                     style = epubBlockStyle(block, fontSizeSp, lineHeight, styles),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = ListMarkerWidth)
+                    modifier = Modifier.width(ListMarkerWidth)
+                )
+                Text(
+                    text = block.slicedText(slice = null, activeWord = activeWord),
+                    style = epubBlockStyle(block, fontSizeSp, lineHeight, styles),
+                    modifier = Modifier.weight(1f)
                 )
             }
         }
         is EpubBlock.Image -> PageImage(
             resourcePath = block.resourcePath,
             contentDescription = block.contentDescription,
-            heightPx = imageHeights[block.resourcePath] ?: placeholderHeightPx.toFloat(),
             widthPx = imageWidthPx,
             loadImageBytes = loadImageBytes
         )
@@ -511,75 +332,39 @@ private fun PageItemView(
     }
 }
 
-/**
- * Decodes the dimensions of every chapter image once and returns its fitted
- * display height (aspect-scaled to the page width, capped to the page height)
- * so the paginator can reserve exact space. Missing entries fall back to the
- * placeholder height, keeping pagination stable while bytes load.
- */
-@Composable
-private fun rememberFittedImageHeights(
-    blocks: List<EpubBlock>,
-    pageWidthPx: Int,
-    pageHeightPx: Int,
-    loadImageBytes: suspend (String) -> ByteArray?
-): State<Map<String, Float>> {
-    val paths = remember(blocks) {
-        blocks.mapNotNull { (it as? EpubBlock.Image)?.resourcePath }.distinct()
-    }
-    val heights = remember(blocks) { mutableStateOf<Map<String, Float>>(emptyMap()) }
-    LaunchedEffect(paths, pageWidthPx, pageHeightPx) {
-        val fitted = mutableMapOf<String, Float>()
-        for (path in paths) {
-            val bytes = loadImageBytes(path) ?: continue
-            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
-            if (options.outWidth <= 0 || options.outHeight <= 0) continue
-            val scaledHeight = options.outHeight.toFloat() * pageWidthPx / options.outWidth.toFloat()
-            fitted[path] = scaledHeight.coerceAtMost(pageHeightPx * IMAGE_MAX_PAGE_FRACTION)
-        }
-        heights.value = fitted
-    }
-    return heights
-}
-
 @Composable
 private fun PageImage(
     resourcePath: String,
     contentDescription: String?,
-    heightPx: Float,
     widthPx: Int,
     loadImageBytes: suspend (String) -> ByteArray?
 ) {
-    val targetHeightPx = heightPx.roundToInt().coerceAtLeast(1)
     val bitmap = produceState<ImageBitmap?>(
         initialValue = null,
         resourcePath,
-        widthPx,
-        targetHeightPx
+        widthPx
     ) {
         val bytes = loadImageBytes(resourcePath) ?: return@produceState
         value = withContext(Dispatchers.IO) {
-            decodeEpubImage(bytes, widthPx, targetHeightPx)
+            decodeEpubImage(bytes, widthPx, targetHeight = 1)
         }
     }.value
-    val height = with(LocalDensity.current) { heightPx.toDp() }
-    Box(
-        modifier = Modifier.fillMaxWidth().height(height),
-        contentAlignment = Alignment.Center
-    ) {
-        if (bitmap == null) {
+    if (bitmap == null) {
+        Box(
+            modifier = Modifier.fillMaxWidth().height(ImagePlaceholderHeight),
+            contentAlignment = Alignment.Center
+        ) {
             CircularProgressIndicator(Modifier.width(22.dp))
-        } else {
-            Image(
-                bitmap = bitmap,
-                contentDescription = contentDescription,
-                // A capped cover box must letterbox rather than stretch the
-                // artwork vertically when its natural aspect ratio is taller.
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize()
-            )
         }
+    } else {
+        Image(
+            bitmap = bitmap,
+            contentDescription = contentDescription,
+            contentScale = ContentScale.Fit,
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(bitmap.width.toFloat() / bitmap.height.coerceAtLeast(1))
+        )
     }
 }
 

@@ -24,11 +24,11 @@ import com.noloxtreme.tts.reader.domain.NarrationController
 import com.noloxtreme.tts.reader.domain.NarrationState
 import com.noloxtreme.tts.reader.domain.OratorSettings
 import com.noloxtreme.tts.reader.domain.Paragraph
-import com.noloxtreme.tts.reader.domain.ReaderPosition
 import com.noloxtreme.tts.reader.domain.ReadingProgress
 import com.noloxtreme.tts.reader.domain.SpokenRange
 import com.noloxtreme.tts.reader.domain.TimeProvider
 import com.noloxtreme.tts.reader.domain.blockAtNarratableRank
+import com.noloxtreme.tts.reader.domain.narratableBlocksBefore
 import com.noloxtreme.tts.reader.domain.narrationOffsetInBlock
 import com.noloxtreme.tts.reader.domain.narrationText
 import com.noloxtreme.tts.reader.domain.usecase.LoadCoverPresence
@@ -37,7 +37,6 @@ import com.noloxtreme.tts.reader.domain.usecase.LoadSpineContent
 import com.noloxtreme.tts.reader.domain.usecase.LoadSpineCount
 import com.noloxtreme.tts.reader.domain.usecase.LoadTableOfContents
 import com.noloxtreme.tts.reader.domain.usecase.IncreaseSpeechRate
-import com.noloxtreme.tts.reader.domain.usecase.ObserveReaderPosition
 import com.noloxtreme.tts.reader.domain.usecase.ReaderContent
 import com.noloxtreme.tts.reader.domain.usecase.ObserveReaderContent
 import com.noloxtreme.tts.reader.domain.usecase.ObserveReadingProgress
@@ -45,7 +44,6 @@ import com.noloxtreme.tts.reader.domain.usecase.ObserveSettings
 import com.noloxtreme.tts.reader.domain.usecase.OpenDocument
 import com.noloxtreme.tts.reader.domain.usecase.PauseNarration
 import com.noloxtreme.tts.reader.domain.usecase.RestartCompletedDocument
-import com.noloxtreme.tts.reader.domain.usecase.SaveReaderPosition
 import com.noloxtreme.tts.reader.domain.usecase.SaveReadingProgress
 import com.noloxtreme.tts.reader.domain.usecase.SeekNarration
 import com.noloxtreme.tts.reader.domain.usecase.SkipSentence
@@ -116,8 +114,6 @@ class ReaderViewModel @Inject constructor(
     private val loadSpineCount: LoadSpineCount,
     private val loadCoverPresence: LoadCoverPresence,
     private val loadImageResource: LoadImageResource,
-    private val observeReaderPosition: ObserveReaderPosition,
-    private val saveReaderPosition: SaveReaderPosition,
     private val saveReadingProgress: SaveReadingProgress,
     val narrationController: NarrationController,
     private val audioExporter: AudioExporter,
@@ -130,8 +126,6 @@ class ReaderViewModel @Inject constructor(
     private val mutableReadMode = MutableStateFlow(false)
     private val mutableVisualReading = MutableStateFlow(VisualReadingState())
     private val mutableEpubReading = MutableStateFlow<EpubReadingState?>(null)
-    private val mutableReaderPageIndex = MutableStateFlow(0)
-    private val mutableReaderPageCount = MutableStateFlow(0)
     private val mutableJumpTarget = MutableStateFlow<PageTextAnchor?>(null)
     private val mutableActiveWordAnchor = MutableStateFlow<PageTextRange?>(null)
     /** Keeps EPUB image bytes bounded while chapter layouts inspect their dimensions. */
@@ -151,13 +145,7 @@ class ReaderViewModel @Inject constructor(
 
     val epubReading: StateFlow<EpubReadingState?> = mutableEpubReading.asStateFlow()
 
-    /** The read-mode page shown inside the current spine item. */
-    val readerPageIndex: StateFlow<Int> = mutableReaderPageIndex.asStateFlow()
-
-    /** How many pages the current spine item was packed into (0 until measured). */
-    val readerPageCount: StateFlow<Int> = mutableReaderPageCount.asStateFlow()
-
-    /** A pending jump target for the paged reader; cleared once it is resolved. */
+    /** A pending block target for the scrollable EPUB reader; cleared once it is resolved. */
     val readerJumpTarget: StateFlow<PageTextAnchor?> = mutableJumpTarget.asStateFlow()
 
     /** The active word mapped into the current EPUB chapter's styled text. */
@@ -173,12 +161,6 @@ class ReaderViewModel @Inject constructor(
         nextWordAction = ::nextReadUnit,
         increasePaceAction = ::increaseVisualReadingPace
     )
-    private val pagedReadTransport = PagedReadingTransport(
-        previousPageAction = ::previousReaderPage,
-        nextPageAction = ::nextReaderPage,
-        increasePaceAction = ::increaseVisualReadingPace
-    )
-
     private val readerContent = pageRequest.flatMapLatest { id ->
         if (id == null) emptyFlow()
         else observeReaderContent.execute(id)
@@ -189,14 +171,10 @@ class ReaderViewModel @Inject constructor(
         .map { it?.document }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    /**
-     * EPUB Read Mode turns pages with its skip controls. Generic silent
-     * reading keeps word-level movement, while narration keeps sentence skips.
-     */
+    /** Read Mode moves by the selected visual unit; narration moves by sentence. */
     val transport: StateFlow<ReaderTransport> = combine(mutableReadMode, document) { reading, currentDocument ->
         when {
             !reading -> narrationTransport
-            currentDocument?.mimeType == EPUB_MIME_TYPE -> pagedReadTransport
             else -> visualReadTransport
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), narrationTransport)
@@ -492,23 +470,13 @@ class ReaderViewModel @Inject constructor(
         if (mutableReadMode.value) return
         val id = pageRequest.value ?: return
         val isEpub = document.value?.mimeType == EPUB_MIME_TYPE
-        val narrationWasActive = narrationController.state.value is NarrationState.Playing ||
-            narrationController.state.value is NarrationState.Preparing
         mutableReadMode.value = true
         // Read Mode is deliberately silent. Never leave a TTS utterance
         // running underneath the moving visual word pointer.
         pauseNarration.execute()
         stopVisualReading(clearCursor = true)
-        mutableReaderPageIndex.value = 0
-        mutableReaderPageCount.value = 0
         viewModelScope.launch {
-            // A saved EPUB page is its own visual-reading checkpoint. Only an
-            // actively playing narration should take precedence over it.
-            val startPosition = if (isEpub && !narrationWasActive) {
-                null
-            } else {
-                visualStartPosition(id)
-            }
+            val startPosition = visualStartPosition(id)
             if (pageRequest.value != id || !mutableReadMode.value) return@launch
             setVisualStart(startPosition)
             if (isEpub) enterEpubReadMode(id, startPosition)
@@ -535,30 +503,21 @@ class ReaderViewModel @Inject constructor(
         mutableEpubReading.update {
             it?.copy(toc = toc, spineCount = spineCount)
         }
-        // Enter at the silent reader's cursor, then fall back to the saved
-        // visual position and finally the opening page.
+        // Enter at the silent reader's cursor, then fall back to the current
+        // chapter (including the synthesized cover when present).
         val cursorSpine = startPosition?.let { position ->
             contentRepository.paragraph(id, position.paragraphIndex)
                 ?.sectionIndex?.plus(coverOffset)
         }
-        val saved = runCatching { observeReaderPosition.execute(id).first() }.getOrNull()
-        val startSpineIndex: Int
-        val initialPageIndex: Int
-        when {
+        val startSpineIndex = when {
             cursorSpine != null && cursorSpine < spineCount -> {
-                startSpineIndex = cursorSpine
-                initialPageIndex = 0
-            }
-            saved != null && saved.spineIndex < spineCount -> {
-                startSpineIndex = saved.spineIndex
-                initialPageIndex = saved.pageIndex
+                cursorSpine
             }
             else -> {
-                startSpineIndex = currentSpineIndexFor(id, coverOffset)
-                initialPageIndex = 0
+                currentSpineIndexFor(id, coverOffset)
             }
         }
-        openSpineItem(startSpineIndex, initialPageIndex, startPosition)
+        openSpineItem(startSpineIndex, narrationJump = startPosition)
     }
 
     fun exitReadMode() {
@@ -764,7 +723,6 @@ class ReaderViewModel @Inject constructor(
         }
         resolveVisualWordAnchor(id, reading, word)?.let { anchor ->
             mutableActiveWordAnchor.value = anchor
-            mutableJumpTarget.value = PageTextAnchor(anchor.blockIndex, anchor.charStart)
         }
     }
 
@@ -825,45 +783,41 @@ class ReaderViewModel @Inject constructor(
     }
 
     /**
-     * Turns to the next page of the current spine item, or opens the next
-     * chapter when the reader is on the last page. Shared by the swipe and
-     * tap gestures and the transport's fast-forward button.
+     * Stores the narratable block currently at the top of a manually scrolled
+     * EPUB chapter. While visual reading is playing, its exact word position
+     * remains the source of truth instead.
      */
-    fun nextReaderPage() {
-        when (val advance = nextPageAdvance(mutableReaderPageIndex.value, mutableReaderPageCount.value)) {
-            is PageTurnAdvance.ToPage -> {
-                mutableReaderPageIndex.value = advance.index
-                persistReaderPosition(advance.index)
+    fun rememberVisibleEpubBlock(blockIndex: Int) {
+        if (!mutableReadMode.value || mutableVisualReading.value.isPlaying) return
+        val id = pageRequest.value ?: return
+        val reading = mutableEpubReading.value ?: return
+        val blocks = reading.content?.blocks ?: return
+        val sectionIndex = reading.currentSpineIndex - reading.coverOffset
+        if (sectionIndex < 0) return
+        val narratableBlock = blocks.indices.firstOrNull { index ->
+            index >= blockIndex && blocks[index].narrationText.isNotEmpty()
+        } ?: blocks.indices.lastOrNull { index ->
+            blocks[index].narrationText.isNotEmpty()
+        } ?: return
+        val rank = narratableBlocksBefore(blocks, narratableBlock)
+        viewModelScope.launch {
+            val section = contentRepository.section(id, sectionIndex) ?: return@launch
+            val paragraph = contentRepository.paragraph(id, section.firstParagraphIndex + rank) ?: return@launch
+            if (
+                pageRequest.value != id ||
+                !mutableReadMode.value ||
+                mutableVisualReading.value.isPlaying ||
+                mutableEpubReading.value?.currentSpineIndex != reading.currentSpineIndex
+            ) {
+                return@launch
             }
-            PageTurnAdvance.CrossChapter -> nextSpineItem()
-            PageTurnAdvance.Stay -> Unit
-        }
-    }
-
-    /**
-     * Turns to the previous page of the current spine item, or opens the
-     * previous chapter when the reader is on the first page. Shared by the
-     * swipe and tap gestures and the transport's rewind button.
-     */
-    fun previousReaderPage() {
-        when (val advance = previousPageAdvance(mutableReaderPageIndex.value)) {
-            is PageTurnAdvance.ToPage -> {
-                mutableReaderPageIndex.value = advance.index
-                persistReaderPosition(advance.index)
-            }
-            PageTurnAdvance.CrossChapter -> previousSpineItem()
-            PageTurnAdvance.Stay -> Unit
-        }
-    }
-
-    /** Accepts a page count only from the spine item currently on screen. */
-    fun setReaderPageCount(spineIndex: Int, count: Int) {
-        if (mutableEpubReading.value?.currentSpineIndex != spineIndex) return
-        mutableReaderPageCount.value = count.coerceAtLeast(0)
-        val maxIndex = (count - 1).coerceAtLeast(0)
-        if (mutableReaderPageIndex.value > maxIndex) {
-            mutableReaderPageIndex.value = maxIndex
-            persistReaderPosition(maxIndex)
+            val position = DocumentPosition(
+                paragraphIndex = paragraph.paragraphIndex,
+                offsetInParagraph = 0,
+                absoluteOffset = paragraph.absoluteStart
+            )
+            visualCursorStart = position
+            checkpointVisualProgress(position, immediately = true)
         }
     }
 
@@ -878,26 +832,17 @@ class ReaderViewModel @Inject constructor(
         return bytes
     }
 
-    /**
-     * Opens a spine item, starting at [initialPageIndex] (page zero for
-     * ordinary chapter navigation, the saved page when resuming read mode).
-     * When [narrationJump] is set, the reader lands on the page that holds
-     * that narration position once the chapter's blocks are loaded.
-     */
+    /** Opens a chapter and, when supplied, scrolls to its narration position. */
     private fun openSpineItem(
         spineIndex: Int,
-        initialPageIndex: Int = 0,
         narrationJump: DocumentPosition? = null
     ) {
         val id = pageRequest.value ?: return
         val requestId = ++spineLoadRequestId
-        mutableReaderPageIndex.value = initialPageIndex
-        mutableReaderPageCount.value = 0
         mutableJumpTarget.value = null
         mutableActiveWordAnchor.value = null
-        // Dispose the old chapter while the next one loads. Otherwise a cover
-        // and a one-page chapter can both report one page, leaving the reset
-        // count at zero and making every forward turn a no-op.
+        // Dispose the old chapter while the next one loads, so a stale block
+        // cannot briefly appear at the top of the newly selected chapter.
         mutableEpubReading.update {
             it?.copy(
                 currentSpineIndex = spineIndex,
@@ -906,7 +851,6 @@ class ReaderViewModel @Inject constructor(
                 unavailable = false
             )
         }
-        persistReaderPosition(initialPageIndex)
         viewModelScope.launch {
             val content = runCatching { loadSpineContent.execute(id, spineIndex) }.getOrNull()
             if (
@@ -954,20 +898,9 @@ class ReaderViewModel @Inject constructor(
         return PageTextAnchor(blockIndex, charStart)
     }
 
-    /** The paged reader resolved a narration jump: own the page and clear the target. */
-    fun resolveReaderJump(pageIndex: Int) {
-        mutableReaderPageIndex.value = pageIndex
+    /** The scrollable reader consumed a narration jump. */
+    fun resolveReaderJump() {
         mutableJumpTarget.value = null
-        persistReaderPosition(pageIndex)
-    }
-
-    /** Best-effort persistence of the current read-mode position. */
-    private fun persistReaderPosition(pageIndex: Int) {
-        val id = pageRequest.value ?: return
-        val spineIndex = mutableEpubReading.value?.currentSpineIndex ?: return
-        viewModelScope.launch {
-            runCatching { saveReaderPosition.execute(id, ReaderPosition(spineIndex, pageIndex)) }
-        }
     }
 
     /**

@@ -56,7 +56,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * Renders the paged EPUB reader with Robolectric's native graphics and writes
+ * Renders the scrolling EPUB reader with Robolectric's native graphics and writes
  * a Play Store screenshot. Captures only when explicitly requested so regular
  * test runs stay side-effect free:
  * ./gradlew :app:testDebugUnitTest --tests "*ReaderScreenshotTest" -Porator.screenshot=true
@@ -70,7 +70,7 @@ class ReaderScreenshotTest {
     val compose = createAndroidComposeRule<ComponentActivity>()
 
     @Test
-    fun capturePagedReaderScreenshot() {
+    fun captureScrollingReaderScreenshot() {
         assumeTrue(
             "Set -Porator.screenshot=true to capture the reader screenshot",
             System.getProperty("orator.screenshot") == "true"
@@ -188,13 +188,9 @@ class ReaderScreenshotTest {
                     unavailable = false,
                     fontSizeSp = 20,
                     lineHeight = LineHeightPreference.COMFORTABLE,
-                    chromeVisible = true,
-                    pageIndex = 2,
                     jumpTarget = null,
-                    onNextPage = {},
-                    onPreviousPage = {},
-                    onPageCountChange = { _, _ -> },
                     onJumpTargetResolved = {},
+                    onVisibleBlockChanged = {},
                     onRetry = {},
                     onToggleChrome = {},
                     loadImageBytes = { null },

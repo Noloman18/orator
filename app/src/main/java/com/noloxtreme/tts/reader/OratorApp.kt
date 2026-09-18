@@ -618,7 +618,6 @@ private fun ReaderScreen(
     val epubReading by viewModel.epubReading.collectAsState()
     val notes by viewModel.notes.collectAsState()
     val transport by viewModel.transport.collectAsState()
-    val readerPageIndex by viewModel.readerPageIndex.collectAsState()
     val readerJumpTarget by viewModel.readerJumpTarget.collectAsState()
     val readerActiveWord by viewModel.readerActiveWord.collectAsState()
     val isEpubReadMode = inReadMode && document?.mimeType == EPUB_MIME_TYPE
@@ -863,7 +862,6 @@ private fun ReaderScreen(
                     playing = playing,
                     transport = transport,
                     reading = inReadMode,
-                    pagedReading = isEpubReadMode,
                     speechRate = settings.speechRate,
                     visualReadingPace = visualReading.pace,
                     visualReadingUnit = visualReading.unit,
@@ -993,14 +991,10 @@ private fun ReaderScreen(
                                         unavailable = readingState.unavailable,
                                         fontSizeSp = settings.readerFontSizeSp,
                                         lineHeight = settings.lineHeight,
-                                        chromeVisible = chromeVisible,
-                                        pageIndex = readerPageIndex,
                                         jumpTarget = readerJumpTarget,
                                         activeWord = readerActiveWord,
-                                        onNextPage = viewModel::nextReaderPage,
-                                        onPreviousPage = viewModel::previousReaderPage,
-                                        onPageCountChange = viewModel::setReaderPageCount,
                                         onJumpTargetResolved = viewModel::resolveReaderJump,
+                                        onVisibleBlockChanged = viewModel::rememberVisibleEpubBlock,
                                         onRetry = viewModel::retryCurrentSpine,
                                         onToggleChrome = { chromeVisible = !chromeVisible },
                                         loadImageBytes = viewModel::imageBytes,
@@ -1455,7 +1449,6 @@ private fun ReaderControls(
     playing: Boolean,
     transport: ReaderTransport,
     reading: Boolean,
-    pagedReading: Boolean,
     speechRate: Float,
     visualReadingPace: Float,
     visualReadingUnit: VisualReadingUnit,
@@ -1502,7 +1495,6 @@ private fun ReaderControls(
                     contentDescription = stringResource(
                         when {
                             !reading -> R.string.previous_sentence
-                            pagedReading -> R.string.previous_page
                             visualReadingUnit == VisualReadingUnit.SENTENCE -> R.string.previous_sentence
                             else -> R.string.previous_word
                         }
@@ -1531,7 +1523,6 @@ private fun ReaderControls(
                     contentDescription = stringResource(
                         when {
                             !reading -> R.string.next_sentence
-                            pagedReading -> R.string.next_page
                             visualReadingUnit == VisualReadingUnit.SENTENCE -> R.string.next_sentence
                             else -> R.string.next_word
                         }
