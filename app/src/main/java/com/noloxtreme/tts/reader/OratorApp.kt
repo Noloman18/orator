@@ -171,8 +171,8 @@ private const val SETTINGS_ROUTE = "settings"
 private const val EXPORTS_ROUTE = "exports"
 private const val READER_ROUTE = "reader/{documentId}"
 private const val SPLASH_DURATION_MILLIS = 5_000L
-/** Google's sample anchored adaptive banner unit, used until live-ad release testing begins. */
-private const val NOTES_BANNER_AD_UNIT_ID = "ca-app-pub-3940256099942544/9214589741"
+/** Production anchored adaptive banner unit for the Book Notes footer. */
+private const val NOTES_BANNER_AD_UNIT_ID = "ca-app-pub-1951746776607933/2591439047"
 @Composable
 fun OratorApp(appViewModel: AppViewModel = hiltViewModel()) {
     val settings by appViewModel.settings.collectAsState()

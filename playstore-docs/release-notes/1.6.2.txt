@@ -1,0 +1,4 @@
+What's new
+
+- EPUB Read Mode now scrolls continuously instead of turning pages.
+- The reader keeps your place as you scroll and follows the active read unit.

@@ -34,10 +34,10 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Orator">
-        <!-- Google's sample Mobile Ads app ID: required while this build is tested. -->
+        <!-- Production Google Mobile Ads app ID for the Book Notes footer. -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-3940256099942544~3347511713" />
+            android:value="ca-app-pub-1951746776607933~4729235966" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
