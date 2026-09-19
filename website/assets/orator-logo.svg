@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" role="img" aria-labelledby="title desc">
+  <title id="title">Orator open book and voice wave</title>
+  <desc id="desc">A compact white open-book outline with a three-bar voice waveform on a teal background.</desc>
+  <rect width="108" height="108" rx="24" fill="#285E61"/>
+  <g fill="#FFFFFF">
+    <path d="M25 35c8-5 18-4 28 2v5c-10-5-19-5-24-1v28c7-3 16-2 24 3v6c-10-5-19-5-28 0V35Z"/>
+    <path d="M83 35c-8-5-18-4-28 2v5c10-5 19-5 24-1v28c-7-3-16-2-24 3v6c10-5 19-5 28 0V35Z"/>
+    <rect x="46" y="50" width="5" height="16" rx="2.5"/>
+    <rect x="54" y="41" width="5" height="34" rx="2.5"/>
+    <rect x="62" y="50" width="5" height="16" rx="2.5"/>
+  </g>
+</svg>

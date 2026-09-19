@@ -1,0 +1,7 @@
+User-agent: Google-adstxt
+Allow: /app-ads.txt
+
+User-agent: *
+Allow: /
+
+Sitemap: https://orator.segoo-inc.com/sitemap.xml
