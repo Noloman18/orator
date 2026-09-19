@@ -130,7 +130,7 @@ h1 em, h2 em { color: var(--amber); font-family: Georgia, "Times New Roman", ser
 .phone-gallery { position: relative; display: flex; align-items: end; justify-content: center; min-height: 31rem; }
 .phone-gallery::before { content: ""; position: absolute; width: 32rem; max-width: 95%; height: 19rem; border-radius: 50%; background: #efe7d7; filter: blur(0); }
 .phone { position: relative; z-index: 1; width: clamp(8.6rem, 15vw, 12.1rem); padding: .35rem; margin: 0; overflow: hidden; background: #111; border: .3rem solid #111; border-radius: 1.55rem; box-shadow: 0 1.4rem 3.5rem rgba(8,19,47,.22); }
-.phone img { width: 100%; border-radius: 1.05rem; }
+.phone img { width: 100%; height: auto; border-radius: 1.05rem; }
 .phone-one { transform: translate(24%, 1.2rem) rotate(-8deg); }
 .phone-two { z-index: 2; transform: translateY(-1.4rem); }
 .phone-three { transform: translate(-24%, 1rem) rotate(8deg); }
