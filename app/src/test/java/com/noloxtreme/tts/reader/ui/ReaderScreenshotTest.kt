@@ -190,7 +190,7 @@ class ReaderScreenshotTest {
                     lineHeight = LineHeightPreference.COMFORTABLE,
                     jumpTarget = null,
                     onJumpTargetResolved = {},
-                    onVisibleBlockChanged = {},
+                    onVisiblePositionChanged = { _, _ -> },
                     onRetry = {},
                     onToggleChrome = {},
                     loadImageBytes = { null },

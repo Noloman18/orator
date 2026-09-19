@@ -29,7 +29,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,6 +44,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -55,9 +58,13 @@ import com.noloxtreme.tts.reader.domain.EpubRun
 import com.noloxtreme.tts.reader.domain.EpubSpineContent
 import com.noloxtreme.tts.reader.domain.EpubTocEntry
 import com.noloxtreme.tts.reader.domain.LineHeightPreference
+import com.noloxtreme.tts.reader.domain.narrationText
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 
 /** Reader geometry shared by the EPUB renderer and its text styles. */
 internal val PageTopPadding = 12.dp
@@ -161,7 +168,7 @@ fun EpubReaderPane(
     jumpTarget: PageTextAnchor?,
     activeWord: PageTextRange? = null,
     onJumpTargetResolved: () -> Unit,
-    onVisibleBlockChanged: (Int) -> Unit,
+    onVisiblePositionChanged: (PageTextAnchor, Boolean) -> Unit,
     onRetry: () -> Unit,
     onToggleChrome: () -> Unit,
     loadImageBytes: suspend (String) -> ByteArray?,
@@ -184,7 +191,7 @@ fun EpubReaderPane(
                 jumpTarget = jumpTarget,
                 activeWord = activeWord,
                 onJumpTargetResolved = onJumpTargetResolved,
-                onVisibleBlockChanged = onVisibleBlockChanged,
+                onVisiblePositionChanged = onVisiblePositionChanged,
                 onToggleChrome = onToggleChrome,
                 loadImageBytes = loadImageBytes
             )
@@ -201,7 +208,7 @@ private fun ScrollableChapterView(
     jumpTarget: PageTextAnchor?,
     activeWord: PageTextRange?,
     onJumpTargetResolved: () -> Unit,
-    onVisibleBlockChanged: (Int) -> Unit,
+    onVisiblePositionChanged: (PageTextAnchor, Boolean) -> Unit,
     onToggleChrome: () -> Unit,
     loadImageBytes: suspend (String) -> ByteArray?
 ) {
@@ -216,11 +223,25 @@ private fun ScrollableChapterView(
             label = MaterialTheme.typography.labelMedium
         )
         val listState = rememberLazyListState()
+        val blockLayouts = remember(spineIndex, fontSizeSp, lineHeight) {
+            mutableStateMapOf<Int, TextLayoutResult>()
+        }
 
         LaunchedEffect(spineIndex, jumpTarget) {
             val target = jumpTarget ?: return@LaunchedEffect
             if (blocks.isNotEmpty()) {
-                listState.scrollToItem(target.blockIndex.coerceIn(0, blocks.lastIndex))
+                val blockIndex = target.blockIndex.coerceIn(0, blocks.lastIndex)
+                listState.scrollToItem(blockIndex)
+                if (blocks[blockIndex].narrationText.isNotEmpty()) {
+                    val layout = snapshotFlow { blockLayouts[blockIndex] }
+                        .filterNotNull()
+                        .first()
+                    if (layout.lineCount > 0) {
+                        val textOffset = target.charStart.coerceIn(0, layout.layoutInput.text.length)
+                        val line = layout.getLineForOffset(textOffset)
+                        listState.scrollToItem(blockIndex, layout.getLineTop(line).roundToInt())
+                    }
+                }
             }
             onJumpTargetResolved()
         }
@@ -231,9 +252,26 @@ private fun ScrollableChapterView(
             }
         }
         LaunchedEffect(listState, spineIndex) {
-            snapshotFlow { listState.firstVisibleItemIndex }
+            snapshotFlow {
+                val layoutInfo = listState.layoutInfo
+                val item = layoutInfo.visibleItemsInfo.firstOrNull()
+                val blockIndex = item?.index ?: return@snapshotFlow null
+                val layout = blockLayouts[blockIndex]
+                val charStart = if (layout == null || layout.lineCount == 0) {
+                    0
+                } else {
+                    val visibleY = (layoutInfo.viewportStartOffset - item.offset)
+                        .coerceAtLeast(0)
+                        .toFloat()
+                    layout.getLineStart(layout.getLineForVerticalPosition(visibleY))
+                }
+                PageTextAnchor(blockIndex, charStart) to listState.isScrollInProgress
+            }
+                .filterNotNull()
                 .distinctUntilChanged()
-                .collect(onVisibleBlockChanged)
+                .collect { (anchor, scrolling) ->
+                    onVisiblePositionChanged(anchor, scrolling)
+                }
         }
 
         Box(
@@ -262,7 +300,8 @@ private fun ScrollableChapterView(
                         lineHeight = lineHeight,
                         styles = styles,
                         imageWidthPx = contentWidthPx,
-                        loadImageBytes = loadImageBytes
+                        loadImageBytes = loadImageBytes,
+                        onTextLayout = { layout -> blockLayouts[index] = layout }
                     )
                 }
             }
@@ -278,22 +317,26 @@ private fun EpubBlockView(
     lineHeight: LineHeightPreference,
     styles: EpubTypeStyles,
     imageWidthPx: Int,
-    loadImageBytes: suspend (String) -> ByteArray?
+    loadImageBytes: suspend (String) -> ByteArray?,
+    onTextLayout: (TextLayoutResult) -> Unit
 ) {
     when (block) {
         is EpubBlock.Heading -> Text(
             text = block.slicedText(slice = null, activeWord = activeWord),
             style = epubBlockStyle(block, fontSizeSp, lineHeight, styles),
-            color = MaterialTheme.colorScheme.onSurface
+            color = MaterialTheme.colorScheme.onSurface,
+            onTextLayout = onTextLayout
         )
         is EpubBlock.Paragraph -> Text(
             text = block.slicedText(slice = null, activeWord = activeWord),
-            style = epubBlockStyle(block, fontSizeSp, lineHeight, styles)
+            style = epubBlockStyle(block, fontSizeSp, lineHeight, styles),
+            onTextLayout = onTextLayout
         )
         is EpubBlock.Quote -> Text(
             text = block.slicedText(slice = null, activeWord = activeWord),
             style = epubBlockStyle(block, fontSizeSp, lineHeight, styles),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            onTextLayout = onTextLayout,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(start = QuoteStartPadding, end = QuoteEndPadding)
@@ -308,6 +351,7 @@ private fun EpubBlockView(
                 Text(
                     text = block.slicedText(slice = null, activeWord = activeWord),
                     style = epubBlockStyle(block, fontSizeSp, lineHeight, styles),
+                    onTextLayout = onTextLayout,
                     modifier = Modifier.weight(1f)
                 )
             }

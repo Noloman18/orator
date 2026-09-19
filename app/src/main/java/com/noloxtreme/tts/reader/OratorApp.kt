@@ -80,6 +80,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -102,6 +103,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -160,6 +162,8 @@ import com.google.android.gms.ads.AdSize
 import com.google.android.gms.ads.AdView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.io.File
@@ -173,6 +177,19 @@ private const val READER_ROUTE = "reader/{documentId}"
 private const val SPLASH_DURATION_MILLIS = 5_000L
 /** Production anchored adaptive banner unit for the Book Notes footer. */
 private const val NOTES_BANNER_AD_UNIT_ID = "ca-app-pub-1951746776607933/2591439047"
+
+private data class ReaderViewportSnapshot(
+    val scrolling: Boolean,
+    val programmatic: Boolean,
+    val position: DocumentPosition?
+)
+
+internal fun paragraphIndexFromReaderKey(key: Any?): Int? {
+    val value = key as? String ?: return null
+    if (!value.startsWith("paragraph-")) return null
+    return value.substringAfter("paragraph-").toIntOrNull()?.takeIf { it >= 0 }
+}
+
 @Composable
 fun OratorApp(appViewModel: AppViewModel = hiltViewModel()) {
     val settings by appViewModel.settings.collectAsState()
@@ -619,6 +636,7 @@ private fun ReaderScreen(
     val notes by viewModel.notes.collectAsState()
     val transport by viewModel.transport.collectAsState()
     val readerJumpTarget by viewModel.readerJumpTarget.collectAsState()
+    val textJumpTarget by viewModel.textJumpTarget.collectAsState()
     val readerActiveWord by viewModel.readerActiveWord.collectAsState()
     val isEpubReadMode = inReadMode && document?.mimeType == EPUB_MIME_TYPE
     var tocSheetVisible by remember(documentId) { mutableStateOf(false) }
@@ -629,7 +647,11 @@ private fun ReaderScreen(
         ?.takeIf { it.documentId == documentId }
         ?.activeRange
     val currentParagraphIndex = narrationPosition?.paragraphIndex ?: -1
-    val currentAbsoluteOffset = if (inReadMode) {
+    val totalCharacterCount = document?.totalCharacterCount ?: 0L
+    val narrationPlaying = narration is NarrationState.Playing || narration is NarrationState.Preparing
+    val playing = if (inReadMode) visualReading.isPlaying else narrationPlaying
+    var manualScrollPosition by remember(documentId) { mutableStateOf<DocumentPosition?>(null) }
+    val currentAbsoluteOffset = manualScrollPosition?.absoluteOffset ?: if (inReadMode) {
         visualReading.activeWord?.position?.absoluteOffset
             ?: progress?.position?.absoluteOffset
             ?: 0L
@@ -638,9 +660,6 @@ private fun ReaderScreen(
             ?: progress?.position?.absoluteOffset
             ?: 0L
     }
-    val totalCharacterCount = document?.totalCharacterCount ?: 0L
-    val narrationPlaying = narration is NarrationState.Playing || narration is NarrationState.Preparing
-    val playing = if (inReadMode) visualReading.isPlaying else narrationPlaying
 
     // Silent Read Mode has no media session to keep the display awake. Keep it on
     // only while its visual word pointer is moving, then restore the user's normal
@@ -659,6 +678,11 @@ private fun ReaderScreen(
     var showNoteComposer by remember(documentId) { mutableStateOf(false) }
     var showBookNotes by remember(documentId) { mutableStateOf(false) }
     var notePosition by remember(documentId) { mutableStateOf(DocumentPosition(0, 0, 0L)) }
+    val paragraphLayouts = remember(
+        documentId,
+        settings.readerFontSizeSp,
+        settings.lineHeight
+    ) { mutableStateMapOf<Int, TextLayoutResult>() }
 
     val exportState by viewModel.exportState.collectAsState()
     val exportSnackbar = remember { SnackbarHostState() }
@@ -745,7 +769,11 @@ private fun ReaderScreen(
         followEnabled = settings.followSpokenText
     }
     LaunchedEffect(inReadMode) {
+        manualScrollPosition = null
         if (inReadMode) chromeVisible = true
+    }
+    LaunchedEffect(playing) {
+        if (playing) manualScrollPosition = null
     }
     LaunchedEffect(currentAbsoluteOffset, totalCharacterCount) {
         if (!isSeeking) {
@@ -758,7 +786,9 @@ private fun ReaderScreen(
         }
     }
     LaunchedEffect(currentParagraphIndex, settings.followSpokenText, followEnabled, lazyParagraphs.itemCount, sectionTitle, inReadMode) {
-        if (!inReadMode && settings.followSpokenText && followEnabled && currentParagraphIndex >= 0 && currentParagraphIndex < lazyParagraphs.itemCount) {
+        if (!inReadMode && textJumpTarget == null && settings.followSpokenText && followEnabled &&
+            currentParagraphIndex >= 0 && currentParagraphIndex < lazyParagraphs.itemCount
+        ) {
             val itemIndex = currentParagraphIndex + if (sectionTitle != null) 1 else 0
             if (itemIndex >= 0) {
                 programmaticScroll = true
@@ -800,17 +830,85 @@ private fun ReaderScreen(
         }
     }
 
-    // Generic text is a scrollable reader rather than packed EPUB pages. Store
-    // the first visible paragraph when the user reads manually, while Read
-    // Mode's moving word pointer is paused. Pointer-driven progress is saved by
-    // the view model at the exact word instead.
-    LaunchedEffect(inReadMode, isEpubReadMode, sectionTitle) {
-        if (!inReadMode || isEpubReadMode) return@LaunchedEffect
-        val contentStartIndex = if (sectionTitle != null) 1 else 0
-        snapshotFlow { listState.firstVisibleItemIndex }
-            .map { itemIndex -> (itemIndex - contentStartIndex).coerceAtLeast(0) }
+    // Slider and note jumps always perform a one-shot exact scroll, independent
+    // of the continuous "follow narration" preference. The first scroll loads
+    // the paged paragraph; the second aligns the line containing the character.
+    LaunchedEffect(
+        textJumpTarget,
+        isEpubReadMode,
+        sectionTitle,
+        lazyParagraphs.itemCount
+    ) {
+        val target = textJumpTarget ?: return@LaunchedEffect
+        if (isEpubReadMode || target.paragraphIndex !in 0 until lazyParagraphs.itemCount) {
+            return@LaunchedEffect
+        }
+        val itemIndex = target.paragraphIndex + if (sectionTitle != null) 1 else 0
+        manualScrollPosition = null
+        programmaticScroll = true
+        try {
+            listState.scrollToItem(itemIndex)
+            val layout = snapshotFlow { paragraphLayouts[target.paragraphIndex] }
+                .filterNotNull()
+                .first()
+            if (layout.lineCount > 0) {
+                val textOffset = target.offsetInParagraph.coerceIn(0, layout.layoutInput.text.length)
+                val line = layout.getLineForOffset(textOffset)
+                listState.scrollToItem(itemIndex, layout.getLineTop(line).roundToInt())
+            }
+        } finally {
+            programmaticScroll = false
+            viewModel.resolveTextJump()
+        }
+    }
+
+    // While playback is stopped, derive the document position from the first
+    // visible text line. This updates the progress UI during the gesture and
+    // commits the position when scrolling settles, in either reader mode.
+    LaunchedEffect(listState, isEpubReadMode, playing, documentId) {
+        if (isEpubReadMode || playing) return@LaunchedEffect
+        var userScrollObserved = false
+        snapshotFlow {
+            val layoutInfo = listState.layoutInfo
+            val paragraphItem = layoutInfo.visibleItemsInfo.firstOrNull { item ->
+                paragraphIndexFromReaderKey(item.key) != null
+            }
+            val position = paragraphItem?.let { item ->
+                val paragraphIndex = paragraphIndexFromReaderKey(item.key) ?: return@let null
+                val paragraph = lazyParagraphs.peek(paragraphIndex) ?: return@let null
+                val textLayout = paragraphLayouts[paragraphIndex]
+                val offsetInParagraph = if (textLayout == null || textLayout.lineCount == 0) {
+                    0
+                } else {
+                    val visibleY = (layoutInfo.viewportStartOffset - item.offset)
+                        .coerceAtLeast(0)
+                        .toFloat()
+                    val line = textLayout.getLineForVerticalPosition(visibleY)
+                    textLayout.getLineStart(line).coerceIn(0, paragraph.text.length)
+                }
+                DocumentPosition(
+                    paragraphIndex = paragraph.paragraphIndex,
+                    offsetInParagraph = offsetInParagraph,
+                    absoluteOffset = paragraph.absoluteStart + offsetInParagraph
+                )
+            }
+            ReaderViewportSnapshot(
+                scrolling = listState.isScrollInProgress,
+                programmatic = programmaticScroll,
+                position = position
+            )
+        }
             .distinctUntilChanged()
-            .collect(viewModel::rememberVisibleReadParagraph)
+            .collect { viewport ->
+                if (viewport.programmatic) return@collect
+                if (viewport.scrolling) userScrollObserved = true
+                if (!userScrollObserved) return@collect
+                viewport.position?.let { manualScrollPosition = it }
+                if (!viewport.scrolling) {
+                    viewport.position?.let(viewModel::rememberManualReadingPosition)
+                    userScrollObserved = false
+                }
+            }
     }
 
     Scaffold(
@@ -953,6 +1051,7 @@ private fun ReaderScreen(
                                         value = seekFraction,
                                         onValueChange = {
                                             isSeeking = true
+                                            manualScrollPosition = null
                                             seekFraction = it
                                         },
                                         onValueChangeFinished = {
@@ -994,7 +1093,12 @@ private fun ReaderScreen(
                                         jumpTarget = readerJumpTarget,
                                         activeWord = readerActiveWord,
                                         onJumpTargetResolved = viewModel::resolveReaderJump,
-                                        onVisibleBlockChanged = viewModel::rememberVisibleEpubBlock,
+                                        onVisiblePositionChanged = { anchor, scrolling ->
+                                            viewModel.rememberVisibleEpubPosition(
+                                                anchor = anchor,
+                                                immediately = !scrolling
+                                            )
+                                        },
                                         onRetry = viewModel::retryCurrentSpine,
                                         onToggleChrome = { chromeVisible = !chromeVisible },
                                         loadImageBytes = viewModel::imageBytes,
@@ -1040,7 +1144,10 @@ private fun ReaderScreen(
                                                     it.paragraphIndex == paragraph.paragraphIndex
                                                 },
                                                 fontSizeSp = settings.readerFontSizeSp,
-                                                lineHeight = settings.lineHeight
+                                                lineHeight = settings.lineHeight,
+                                                onTextLayout = { layout ->
+                                                    paragraphLayouts[paragraph.paragraphIndex] = layout
+                                                }
                                             )
                                         }
                                     }
@@ -1409,7 +1516,8 @@ private fun ParagraphText(
     text: String,
     activeRange: SpokenRange?,
     fontSizeSp: Int,
-    lineHeight: LineHeightPreference
+    lineHeight: LineHeightPreference,
+    onTextLayout: (TextLayoutResult) -> Unit = {}
 ) {
     val multiplier = lineHeightMultiplier(lineHeight)
     Text(
@@ -1417,7 +1525,8 @@ private fun ParagraphText(
         style = MaterialTheme.typography.bodyLarge.copy(
             fontSize = fontSizeSp.coerceIn(14, 32).sp,
             lineHeight = (fontSizeSp.coerceIn(14, 32) * multiplier).sp
-        )
+        ),
+        onTextLayout = onTextLayout
     )
 }
 
