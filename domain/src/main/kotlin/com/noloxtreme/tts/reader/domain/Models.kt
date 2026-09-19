@@ -250,6 +250,20 @@ interface ContentRepository {
 
     suspend fun paragraph(id: DocumentId, index: Int): Paragraph?
     suspend fun paragraphContaining(id: DocumentId, absoluteOffset: Long): Paragraph?
+    /**
+     * Returns paragraphs that contain [query], in reading order. Implementations
+     * may use an indexed database search; the fallback keeps test and alternate
+     * repositories functional.
+     */
+    suspend fun searchParagraphs(
+        id: DocumentId,
+        query: String,
+        limit: Int
+    ): List<Paragraph> = allParagraphs(id)
+        .asSequence()
+        .filter { paragraph -> paragraph.text.contains(query, ignoreCase = true) }
+        .take(limit.coerceAtLeast(0))
+        .toList()
     suspend fun section(id: DocumentId, index: Int): Section?
     /** Every paragraph of the document in narration order; used by full-book audio export. */
     suspend fun allParagraphs(id: DocumentId): List<Paragraph>

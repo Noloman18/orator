@@ -111,6 +111,21 @@ interface ContentDao {
         """
         SELECT * FROM paragraphs
         WHERE documentId = :documentId
+          AND text LIKE '%' || :escapedQuery || '%' ESCAPE '\' COLLATE NOCASE
+        ORDER BY paragraphIndex
+        LIMIT :limit
+        """
+    )
+    suspend fun searchParagraphs(
+        documentId: String,
+        escapedQuery: String,
+        limit: Int
+    ): List<ParagraphEntity>
+
+    @Query(
+        """
+        SELECT * FROM paragraphs
+        WHERE documentId = :documentId
         ORDER BY paragraphIndex DESC
         LIMIT 1
         """

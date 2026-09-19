@@ -13,7 +13,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -39,9 +42,12 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.Replay
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.SkipNext
 import androidx.compose.material.icons.outlined.SkipPrevious
 import androidx.compose.material.icons.outlined.Toc
@@ -90,11 +96,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
@@ -106,9 +115,11 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavType
@@ -147,6 +158,7 @@ import com.noloxtreme.tts.reader.ui.LibraryLoadState
 import com.noloxtreme.tts.reader.ui.ReaderViewModel
 import com.noloxtreme.tts.reader.ui.ReaderLoadState
 import com.noloxtreme.tts.reader.ui.ReaderTransport
+import com.noloxtreme.tts.reader.ui.TextWordRange
 import com.noloxtreme.tts.reader.ui.VoiceNotePlayer
 import com.noloxtreme.tts.reader.ui.VoiceNoteRecorder
 import com.noloxtreme.tts.reader.ui.VoiceNoteRecording
@@ -156,6 +168,7 @@ import com.noloxtreme.tts.reader.ui.lineHeightMultiplier
 import com.noloxtreme.tts.reader.ui.SettingsViewModel
 import com.noloxtreme.tts.reader.ui.VisualReadingUnit
 import com.noloxtreme.tts.reader.ui.VoicePreviewStatus
+import com.noloxtreme.tts.reader.ui.wordAtOrAfter
 import com.noloxtreme.tts.reader.ui.theme.OratorTheme
 import com.google.android.gms.ads.AdRequest
 import com.google.android.gms.ads.AdSize
@@ -638,8 +651,14 @@ private fun ReaderScreen(
     val readerJumpTarget by viewModel.readerJumpTarget.collectAsState()
     val textJumpTarget by viewModel.textJumpTarget.collectAsState()
     val readerActiveWord by viewModel.readerActiveWord.collectAsState()
+    val searchState by viewModel.searchState.collectAsState()
+    val wordActionTarget by viewModel.wordAction.collectAsState()
     val isEpubReadMode = inReadMode && document?.mimeType == EPUB_MIME_TYPE
     var tocSheetVisible by remember(documentId) { mutableStateOf(false) }
+    var searchOpen by rememberSaveable(documentId) { mutableStateOf(false) }
+    var searchQuery by rememberSaveable(documentId) { mutableStateOf("") }
+    val searchFocusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
     val lazyParagraphs = viewModel.paragraphs.collectAsLazyPagingItems()
     val listState = rememberLazyListState()
     val narrationPosition = narration.positionFor(documentId)
@@ -683,6 +702,9 @@ private fun ReaderScreen(
         settings.readerFontSizeSp,
         settings.lineHeight
     ) { mutableStateMapOf<Int, TextLayoutResult>() }
+    val searchMatchesByParagraph = remember(searchState.matches) {
+        searchState.matches.groupBy { it.range.paragraphIndex }
+    }
 
     val exportState by viewModel.exportState.collectAsState()
     val exportSnackbar = remember { SnackbarHostState() }
@@ -710,6 +732,12 @@ private fun ReaderScreen(
 
             else -> viewModel.exportAudio()
         }
+    }
+    val startNarrationService: () -> Unit = {
+        context.startService(
+            android.content.Intent(context, NarrationService::class.java)
+                .putExtra(NarrationService.EXTRA_DOCUMENT_ID, documentId.value)
+        )
     }
     LaunchedEffect(Unit) {
         viewModel.exportMessages.collect { message ->
@@ -764,6 +792,21 @@ private fun ReaderScreen(
 
     LaunchedEffect(documentId) {
         viewModel.load(documentId)
+    }
+    LaunchedEffect(searchOpen, searchQuery, document?.id) {
+        if (!searchOpen) {
+            viewModel.clearSearch()
+            return@LaunchedEffect
+        }
+        delay(250)
+        viewModel.search(searchQuery)
+    }
+    LaunchedEffect(searchOpen) {
+        if (searchOpen) {
+            delay(100)
+            searchFocusRequester.requestFocus()
+            keyboardController?.show()
+        }
     }
     LaunchedEffect(settings.followSpokenText) {
         followEnabled = settings.followSpokenText
@@ -823,7 +866,16 @@ private fun ReaderScreen(
             val itemIndex = activeWord.range.paragraphIndex + if (sectionTitle != null) 1 else 0
             programmaticScroll = true
             try {
-                listState.animateScrollToItem(itemIndex)
+                listState.scrollToItem(itemIndex)
+                val layout = snapshotFlow { paragraphLayouts[activeWord.range.paragraphIndex] }
+                    .filterNotNull()
+                    .first()
+                if (layout.lineCount > 0) {
+                    val line = layout.getLineForOffset(
+                        activeWord.range.startInParagraph.coerceIn(0, layout.layoutInput.text.length)
+                    )
+                    listState.scrollToItem(itemIndex, layout.getLineTop(line).roundToInt())
+                }
             } finally {
                 programmaticScroll = false
             }
@@ -916,12 +968,35 @@ private fun ReaderScreen(
             if (!inReadMode || chromeVisible) {
                 TopAppBar(
                     title = {
-                        Text(document?.title ?: stringResource(R.string.reader_title), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            document?.title ?: stringResource(R.string.reader_title),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     },
                     navigationIcon = {
                         IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = stringResource(R.string.back)) }
                     },
                     actions = {
+                        IconButton(
+                            onClick = {
+                                if (searchOpen) {
+                                    searchOpen = false
+                                    searchQuery = ""
+                                    keyboardController?.hide()
+                                    viewModel.clearSearch()
+                                } else {
+                                    searchOpen = true
+                                }
+                            }
+                        ) {
+                            Icon(
+                                if (searchOpen) Icons.Outlined.Close else Icons.Outlined.Search,
+                                contentDescription = stringResource(
+                                    if (searchOpen) R.string.close_search else R.string.find_in_book
+                                )
+                            )
+                        }
                         if (inReadMode) {
                             if (document?.mimeType == EPUB_MIME_TYPE) {
                                 IconButton(onClick = { tocSheetVisible = true }) {
@@ -970,12 +1045,10 @@ private fun ReaderScreen(
                             viewModel.toggleVisualReading()
                         } else {
                             if (!playing) {
-                            val serviceIntent = android.content.Intent(context, NarrationService::class.java)
-                                .putExtra(NarrationService.EXTRA_DOCUMENT_ID, documentId.value)
                             // Start while the reader is visible. Media3 promotes the service to
                             // foreground in sync with playback, avoiding the platform's five-second
                             // foreground-service deadline before narration has entered Playing.
-                            context.startService(serviceIntent)
+                            startNarrationService()
                             }
                             if (narration is NarrationState.Completed) {
                                 viewModel.restart()
@@ -1036,6 +1109,19 @@ private fun ReaderScreen(
                                         ((exportState as? ExportState.Running)?.percent ?: 0) / 100f
                                     },
                                     modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                            if (searchOpen) {
+                                ReaderFindBar(
+                                    query = searchQuery,
+                                    searching = searchState.searching,
+                                    matchCount = searchState.matches.size,
+                                    activeMatchIndex = searchState.activeMatchIndex,
+                                    truncated = searchState.truncated,
+                                    focusRequester = searchFocusRequester,
+                                    onQueryChange = { searchQuery = it },
+                                    onPrevious = viewModel::previousSearchMatch,
+                                    onNext = viewModel::nextSearchMatch
                                 )
                             }
                             if (!inReadMode || chromeVisible) {
@@ -1100,8 +1186,11 @@ private fun ReaderScreen(
                                             )
                                         },
                                         onRetry = viewModel::retryCurrentSpine,
-                                        onToggleChrome = { chromeVisible = !chromeVisible },
+                                        onToggleChrome = {
+                                            if (!searchOpen) chromeVisible = !chromeVisible
+                                        },
                                         loadImageBytes = viewModel::imageBytes,
+                                        onWordLongPress = viewModel::openEpubWordAction,
                                         modifier = Modifier.weight(1f)
                                     )
                                 } else {
@@ -1138,15 +1227,37 @@ private fun ReaderScreen(
                                             } else {
                                                 currentRange
                                             }
+                                            val searchRanges = searchMatchesByParagraph[
+                                                paragraph.paragraphIndex
+                                            ].orEmpty().map { it.range }
+                                            val activeSearchRange = searchState.activeMatch?.range
+                                                ?.takeIf {
+                                                    it.paragraphIndex == paragraph.paragraphIndex
+                                                }
                                             ParagraphText(
                                                 text = paragraph.text,
                                                 activeRange = activeRange?.takeIf {
                                                     it.paragraphIndex == paragraph.paragraphIndex
                                                 },
+                                                searchRanges = searchRanges,
+                                                activeSearchRange = activeSearchRange,
                                                 fontSizeSp = settings.readerFontSizeSp,
                                                 lineHeight = settings.lineHeight,
                                                 onTextLayout = { layout ->
                                                     paragraphLayouts[paragraph.paragraphIndex] = layout
+                                                },
+                                                onLongPressWord = { range ->
+                                                    viewModel.openWordAction(
+                                                        word = paragraph.text.substring(
+                                                            range.start,
+                                                            range.endExclusive
+                                                        ),
+                                                        position = DocumentPosition(
+                                                            paragraphIndex = paragraph.paragraphIndex,
+                                                            offsetInParagraph = range.start,
+                                                            absoluteOffset = paragraph.absoluteStart + range.start
+                                                        )
+                                                    )
                                                 }
                                             )
                                         }
@@ -1211,6 +1322,99 @@ private fun ReaderScreen(
             onDeleteNote = viewModel::deleteNote,
             onDismiss = { showBookNotes = false }
         )
+    }
+    wordActionTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = viewModel::dismissWordAction,
+            title = { Text(stringResource(R.string.word_action_title, target.word)) },
+            text = { Text(stringResource(R.string.word_action_description)) },
+            confirmButton = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = viewModel::dismissWordAction) {
+                        Text(stringResource(R.string.cancel))
+                    }
+                    Button(onClick = {
+                        startNarrationService()
+                        viewModel.startNarrationAt(target.position)
+                        viewModel.dismissWordAction()
+                    }) {
+                        Text(stringResource(R.string.start_narration_here))
+                    }
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = {
+                    viewModel.startVisualReadingAt(target.position)
+                    viewModel.dismissWordAction()
+                }) {
+                    Text(stringResource(R.string.start_reading_here))
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun ReaderFindBar(
+    query: String,
+    searching: Boolean,
+    matchCount: Int,
+    activeMatchIndex: Int?,
+    truncated: Boolean,
+    focusRequester: FocusRequester,
+    onQueryChange: (String) -> Unit,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit
+) {
+    val resultLabel = when {
+        searching -> stringResource(R.string.searching)
+        query.isNotBlank() && matchCount == 0 -> stringResource(R.string.no_matches)
+        matchCount > 0 -> stringResource(
+            R.string.search_match_position,
+            (activeMatchIndex ?: 0) + 1,
+            matchCount,
+            if (truncated) "+" else ""
+        )
+        else -> ""
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 22.dp, end = 22.dp, top = 8.dp, bottom = 2.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                label = { Text(stringResource(R.string.find_text)) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { onNext() }),
+                modifier = Modifier
+                    .weight(1f)
+                    .focusRequester(focusRequester)
+            )
+            IconButton(onClick = onPrevious, enabled = matchCount > 0) {
+                Icon(
+                    Icons.Outlined.KeyboardArrowUp,
+                    contentDescription = stringResource(R.string.previous_match)
+                )
+            }
+            IconButton(onClick = onNext, enabled = matchCount > 0) {
+                Icon(
+                    Icons.Outlined.KeyboardArrowDown,
+                    contentDescription = stringResource(R.string.next_match)
+                )
+            }
+        }
+        if (resultLabel.isNotBlank()) {
+            Text(
+                resultLabel,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+            )
+        }
     }
 }
 
@@ -1515,41 +1719,88 @@ private fun voiceNoteDurationLabel(durationMillis: Long): String {
 private fun ParagraphText(
     text: String,
     activeRange: SpokenRange?,
+    searchRanges: List<SpokenRange> = emptyList(),
+    activeSearchRange: SpokenRange? = null,
     fontSizeSp: Int,
     lineHeight: LineHeightPreference,
-    onTextLayout: (TextLayoutResult) -> Unit = {}
+    onTextLayout: (TextLayoutResult) -> Unit = {},
+    onLongPressWord: ((TextWordRange) -> Unit)? = null
 ) {
     val multiplier = lineHeightMultiplier(lineHeight)
+    var textLayout by remember(text) { mutableStateOf<TextLayoutResult?>(null) }
     Text(
-        text = highlightedText(text, activeRange),
+        text = highlightedText(text, activeRange, searchRanges, activeSearchRange),
         style = MaterialTheme.typography.bodyLarge.copy(
             fontSize = fontSizeSp.coerceIn(14, 32).sp,
             lineHeight = (fontSizeSp.coerceIn(14, 32) * multiplier).sp
         ),
-        onTextLayout = onTextLayout
+        modifier = if (onLongPressWord == null) {
+            Modifier
+        } else {
+            Modifier.pointerInput(text, onLongPressWord) {
+                detectTapGestures(
+                    onLongPress = { tapPosition ->
+                        val offset = textLayout?.getOffsetForPosition(tapPosition) ?: return@detectTapGestures
+                        wordAtOrAfter(text, offset)?.let(onLongPressWord)
+                    }
+                )
+            }
+        },
+        onTextLayout = { layout ->
+            textLayout = layout
+            onTextLayout(layout)
+        }
     )
 }
 
-private fun highlightedText(text: String, range: SpokenRange?): AnnotatedString = buildAnnotatedString {
-    if (range == null) {
-        append(text)
-        return@buildAnnotatedString
-    }
-    val start = range.startInParagraph.coerceIn(0, text.length)
-    val end = range.endExclusiveInParagraph.coerceIn(start, text.length)
-    append(text.substring(0, start))
-    if (end > start) {
-        pushStyle(
-            SpanStyle(
-                background = OratorDesignTokens.warmHighlight,
-                color = OratorDesignTokens.ink,
-                fontWeight = FontWeight.SemiBold
+private fun highlightedText(
+    text: String,
+    activeRange: SpokenRange?,
+    searchRanges: List<SpokenRange>,
+    activeSearchRange: SpokenRange?
+): AnnotatedString = buildAnnotatedString {
+    append(text)
+    searchRanges.forEach { range ->
+        val start = range.startInParagraph.coerceIn(0, text.length)
+        val end = range.endExclusiveInParagraph.coerceIn(start, text.length)
+        if (end > start) {
+            addStyle(
+                SpanStyle(background = OratorDesignTokens.secondaryContainer),
+                start,
+                end
             )
-        )
-        append(text.substring(start, end))
-        pop()
+        }
     }
-    append(text.substring(end))
+    activeSearchRange?.let { range ->
+        val start = range.startInParagraph.coerceIn(0, text.length)
+        val end = range.endExclusiveInParagraph.coerceIn(start, text.length)
+        if (end > start) {
+            addStyle(
+                SpanStyle(
+                    background = OratorDesignTokens.warmHighlight,
+                    color = OratorDesignTokens.ink,
+                    fontWeight = FontWeight.SemiBold
+                ),
+                start,
+                end
+            )
+        }
+    }
+    activeRange?.let { range ->
+        val start = range.startInParagraph.coerceIn(0, text.length)
+        val end = range.endExclusiveInParagraph.coerceIn(start, text.length)
+        if (end > start) {
+            addStyle(
+                SpanStyle(
+                    background = OratorDesignTokens.warmHighlight,
+                    color = OratorDesignTokens.ink,
+                    fontWeight = FontWeight.SemiBold
+                ),
+                start,
+                end
+            )
+        }
+    }
 }
 
 @Composable

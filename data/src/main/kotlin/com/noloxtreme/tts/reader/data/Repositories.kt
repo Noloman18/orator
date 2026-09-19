@@ -100,6 +100,19 @@ class RoomContentRepository @Inject constructor(
         absoluteOffset: Long
     ): Paragraph? = contentDao.findParagraphContaining(id.value, absoluteOffset)?.toDomain()
 
+    override suspend fun searchParagraphs(
+        id: DocumentId,
+        query: String,
+        limit: Int
+    ): List<Paragraph> {
+        if (query.isEmpty() || limit <= 0) return emptyList()
+        val escapedQuery = query
+            .replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+        return contentDao.searchParagraphs(id.value, escapedQuery, limit).map(ParagraphEntity::toDomain)
+    }
+
     override suspend fun section(id: DocumentId, index: Int): Section? =
         sectionDao.get(id.value, index)?.toDomain()
 

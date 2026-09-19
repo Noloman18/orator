@@ -74,6 +74,34 @@ class RoomContentRepositoryTest : RoomDatabaseTest() {
         assertEquals(secondSentenceStart, previous.offsetInParagraph)
     }
 
+    @Test
+    fun searchFindsCaseInsensitiveTextAndTreatsLikeWildcardsLiterally() = runBlocking {
+        val literalText = "A 100%_ certainty."
+        database.contentDao().insertBatch(
+            listOf(
+                ParagraphEntity(
+                    documentId = documentId.value,
+                    paragraphIndex = 1,
+                    sectionIndex = 0,
+                    text = literalText,
+                    absoluteStart = text.length.toLong() + 1,
+                    absoluteEnd = text.length.toLong() + 1 + literalText.length
+                )
+            )
+        )
+
+        assertEquals(
+            listOf(0),
+            repository.searchParagraphs(documentId, "SECOND", limit = 10)
+                .map { it.paragraphIndex }
+        )
+        assertEquals(
+            listOf(1),
+            repository.searchParagraphs(documentId, "100%_", limit = 10)
+                .map { it.paragraphIndex }
+        )
+    }
+
     private fun positionAt(offset: Int) = DocumentPosition(
         paragraphIndex = 0,
         offsetInParagraph = offset,

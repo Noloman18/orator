@@ -29,13 +29,17 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -172,6 +176,7 @@ fun EpubReaderPane(
     onRetry: () -> Unit,
     onToggleChrome: () -> Unit,
     loadImageBytes: suspend (String) -> ByteArray?,
+    onWordLongPress: (PageTextAnchor) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Box(modifier = modifier.fillMaxSize()) {
@@ -193,7 +198,8 @@ fun EpubReaderPane(
                 onJumpTargetResolved = onJumpTargetResolved,
                 onVisiblePositionChanged = onVisiblePositionChanged,
                 onToggleChrome = onToggleChrome,
-                loadImageBytes = loadImageBytes
+                loadImageBytes = loadImageBytes,
+                onWordLongPress = onWordLongPress
             )
         }
     }
@@ -210,7 +216,8 @@ private fun ScrollableChapterView(
     onJumpTargetResolved: () -> Unit,
     onVisiblePositionChanged: (PageTextAnchor, Boolean) -> Unit,
     onToggleChrome: () -> Unit,
-    loadImageBytes: suspend (String) -> ByteArray?
+    loadImageBytes: suspend (String) -> ByteArray?,
+    onWordLongPress: (PageTextAnchor) -> Unit
 ) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val density = LocalDensity.current
@@ -301,7 +308,10 @@ private fun ScrollableChapterView(
                         styles = styles,
                         imageWidthPx = contentWidthPx,
                         loadImageBytes = loadImageBytes,
-                        onTextLayout = { layout -> blockLayouts[index] = layout }
+                        onTextLayout = { layout -> blockLayouts[index] = layout },
+                        onWordLongPress = { charOffset ->
+                            onWordLongPress(PageTextAnchor(index, charOffset))
+                        }
                     )
                 }
             }
@@ -318,25 +328,29 @@ private fun EpubBlockView(
     styles: EpubTypeStyles,
     imageWidthPx: Int,
     loadImageBytes: suspend (String) -> ByteArray?,
-    onTextLayout: (TextLayoutResult) -> Unit
+    onTextLayout: (TextLayoutResult) -> Unit,
+    onWordLongPress: (Int) -> Unit
 ) {
     when (block) {
-        is EpubBlock.Heading -> Text(
+        is EpubBlock.Heading -> EpubInteractiveText(
             text = block.slicedText(slice = null, activeWord = activeWord),
             style = epubBlockStyle(block, fontSizeSp, lineHeight, styles),
             color = MaterialTheme.colorScheme.onSurface,
-            onTextLayout = onTextLayout
+            onTextLayout = onTextLayout,
+            onWordLongPress = onWordLongPress
         )
-        is EpubBlock.Paragraph -> Text(
+        is EpubBlock.Paragraph -> EpubInteractiveText(
             text = block.slicedText(slice = null, activeWord = activeWord),
             style = epubBlockStyle(block, fontSizeSp, lineHeight, styles),
-            onTextLayout = onTextLayout
+            onTextLayout = onTextLayout,
+            onWordLongPress = onWordLongPress
         )
-        is EpubBlock.Quote -> Text(
+        is EpubBlock.Quote -> EpubInteractiveText(
             text = block.slicedText(slice = null, activeWord = activeWord),
             style = epubBlockStyle(block, fontSizeSp, lineHeight, styles),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             onTextLayout = onTextLayout,
+            onWordLongPress = onWordLongPress,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(start = QuoteStartPadding, end = QuoteEndPadding)
@@ -348,10 +362,11 @@ private fun EpubBlockView(
                     style = epubBlockStyle(block, fontSizeSp, lineHeight, styles),
                     modifier = Modifier.width(ListMarkerWidth)
                 )
-                Text(
+                EpubInteractiveText(
                     text = block.slicedText(slice = null, activeWord = activeWord),
                     style = epubBlockStyle(block, fontSizeSp, lineHeight, styles),
                     onTextLayout = onTextLayout,
+                    onWordLongPress = onWordLongPress,
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -374,6 +389,32 @@ private fun EpubBlockView(
             color = MaterialTheme.colorScheme.outlineVariant
         )
     }
+}
+
+@Composable
+private fun EpubInteractiveText(
+    text: AnnotatedString,
+    style: TextStyle,
+    onTextLayout: (TextLayoutResult) -> Unit,
+    onWordLongPress: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    color: Color = Color.Unspecified
+) {
+    var textLayout by remember(text) { mutableStateOf<TextLayoutResult?>(null) }
+    Text(
+        text = text,
+        style = style,
+        color = color,
+        modifier = modifier.pointerInput(text, onWordLongPress) {
+            detectTapGestures(onLongPress = { position ->
+                textLayout?.getOffsetForPosition(position)?.let(onWordLongPress)
+            })
+        },
+        onTextLayout = { layout ->
+            textLayout = layout
+            onTextLayout(layout)
+        }
+    )
 }
 
 @Composable

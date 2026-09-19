@@ -96,6 +96,58 @@ data class EpubReadingState(
     val coverOffset: Int
 )
 
+/** One occurrence returned by the reader's in-book Find feature. */
+data class ReaderSearchMatch(
+    val position: DocumentPosition,
+    val range: SpokenRange
+)
+
+/** UI state for the reader's in-book Find bar. */
+data class ReaderSearchState(
+    val query: String = "",
+    val matches: List<ReaderSearchMatch> = emptyList(),
+    val activeMatchIndex: Int? = null,
+    val searching: Boolean = false,
+    val truncated: Boolean = false
+) {
+    val activeMatch: ReaderSearchMatch?
+        get() = activeMatchIndex?.let(matches::getOrNull)
+}
+
+/** A word chosen from the reader, ready for a Read-or-Narrate action. */
+data class ReaderWordAction(
+    val word: String,
+    val position: DocumentPosition
+)
+
+/** Finds non-overlapping, case-insensitive occurrences in already matched paragraphs. */
+internal fun findTextMatches(
+    paragraphs: List<Paragraph>,
+    query: String,
+    limit: Int
+): List<ReaderSearchMatch> {
+    if (query.isEmpty() || limit <= 0) return emptyList()
+    val matches = ArrayList<ReaderSearchMatch>()
+    paragraphs.forEach { paragraph ->
+        var offset = 0
+        while (offset < paragraph.text.length && matches.size < limit) {
+            val start = paragraph.text.indexOf(query, startIndex = offset, ignoreCase = true)
+            if (start < 0) break
+            val end = start + query.length
+            matches += ReaderSearchMatch(
+                position = DocumentPosition(
+                    paragraphIndex = paragraph.paragraphIndex,
+                    offsetInParagraph = start,
+                    absoluteOffset = paragraph.absoluteStart + start
+                ),
+                range = SpokenRange(paragraph.paragraphIndex, start, end)
+            )
+            offset = end
+        }
+    }
+    return matches
+}
+
 @HiltViewModel
 @OptIn(ExperimentalCoroutinesApi::class)
 class ReaderViewModel @Inject constructor(
@@ -130,6 +182,8 @@ class ReaderViewModel @Inject constructor(
     private val mutableJumpTarget = MutableStateFlow<PageTextAnchor?>(null)
     private val mutableTextJumpTarget = MutableStateFlow<DocumentPosition?>(null)
     private val mutableActiveWordAnchor = MutableStateFlow<PageTextRange?>(null)
+    private val mutableSearchState = MutableStateFlow(ReaderSearchState())
+    private val mutableWordAction = MutableStateFlow<ReaderWordAction?>(null)
     /** Keeps EPUB image bytes bounded while chapter layouts inspect their dimensions. */
     private val imageCache = object : LruCache<String, ByteArray>(EPUB_IMAGE_CACHE_MAX_BYTES) {
         override fun sizeOf(key: String, value: ByteArray): Int = value.size
@@ -137,6 +191,7 @@ class ReaderViewModel @Inject constructor(
     private var visualReadingJob: Job? = null
     private var visualProgressCheckpointJob: Job? = null
     private var manualEpubPositionJob: Job? = null
+    private var searchJob: Job? = null
     private var pendingVisualProgress: VisualProgressCheckpoint? = null
     private var spineLoadRequestId = 0L
 
@@ -153,6 +208,12 @@ class ReaderViewModel @Inject constructor(
 
     /** A one-shot exact position for the generic text reader to bring into view. */
     val textJumpTarget: StateFlow<DocumentPosition?> = mutableTextJumpTarget.asStateFlow()
+
+    /** Matches and selection for the in-book Find bar. */
+    val searchState: StateFlow<ReaderSearchState> = mutableSearchState.asStateFlow()
+
+    /** A selected word for the reader's Read-or-Narrate action sheet. */
+    val wordAction: StateFlow<ReaderWordAction?> = mutableWordAction.asStateFlow()
 
     /** The active word mapped into the current EPUB chapter's styled text. */
     val readerActiveWord: StateFlow<PageTextRange?> = mutableActiveWordAnchor.asStateFlow()
@@ -346,6 +407,116 @@ class ReaderViewModel @Inject constructor(
         else contentRepository.pagedParagraphs(id, initialParagraph.value)
     }.cachedIn(viewModelScope)
 
+    /** Starts a case-insensitive Find search and opens its first result. */
+    fun search(query: String) {
+        val normalizedQuery = query.trim()
+        searchJob?.cancel()
+        if (normalizedQuery.isEmpty()) {
+            mutableSearchState.value = ReaderSearchState()
+            return
+        }
+        val id = pageRequest.value ?: return
+        mutableSearchState.value = ReaderSearchState(query = normalizedQuery, searching = true)
+        searchJob = viewModelScope.launch {
+            val paragraphs = withContext(Dispatchers.IO) {
+                contentRepository.searchParagraphs(
+                    id = id,
+                    query = normalizedQuery,
+                    limit = SEARCH_PARAGRAPH_LIMIT
+                )
+            }
+            val matches = findTextMatches(
+                paragraphs = paragraphs,
+                query = normalizedQuery,
+                limit = SEARCH_MATCH_LIMIT
+            )
+            if (pageRequest.value != id || mutableSearchState.value.query != normalizedQuery) {
+                return@launch
+            }
+            val state = ReaderSearchState(
+                query = normalizedQuery,
+                matches = matches,
+                activeMatchIndex = matches.indices.firstOrNull(),
+                truncated = paragraphs.size >= SEARCH_PARAGRAPH_LIMIT ||
+                    matches.size >= SEARCH_MATCH_LIMIT
+            )
+            mutableSearchState.value = state
+            state.activeMatch?.let(::navigateToSearchMatch)
+        }
+    }
+
+    fun clearSearch() {
+        searchJob?.cancel()
+        searchJob = null
+        mutableSearchState.value = ReaderSearchState()
+    }
+
+    fun openWordAction(position: DocumentPosition, word: String) {
+        if (word.isBlank()) return
+        mutableWordAction.value = ReaderWordAction(word = word, position = position)
+    }
+
+    fun dismissWordAction() {
+        mutableWordAction.value = null
+    }
+
+    /** Resolves a long-pressed styled EPUB character back to its stored paragraph word. */
+    fun openEpubWordAction(anchor: PageTextAnchor) {
+        val id = pageRequest.value ?: return
+        val reading = mutableEpubReading.value ?: return
+        val blocks = reading.content?.blocks ?: return
+        val block = blocks.getOrNull(anchor.blockIndex) ?: return
+        if (block.narrationText.isEmpty()) return
+        val sectionIndex = reading.currentSpineIndex - reading.coverOffset
+        if (sectionIndex < 0) return
+        val rank = narratableBlocksBefore(blocks, anchor.blockIndex)
+        viewModelScope.launch {
+            val section = contentRepository.section(id, sectionIndex) ?: return@launch
+            val paragraph = contentRepository.paragraph(id, section.firstParagraphIndex + rank) ?: return@launch
+            if (
+                pageRequest.value != id ||
+                mutableEpubReading.value?.currentSpineIndex != reading.currentSpineIndex
+            ) return@launch
+            val offset = narrationOffsetInParagraph(block.narrationText, anchor.charStart)
+                .coerceIn(0, paragraph.text.length)
+            val range = wordAtOrAfter(paragraph.text, offset) ?: return@launch
+            openWordAction(
+                position = DocumentPosition(
+                    paragraphIndex = paragraph.paragraphIndex,
+                    offsetInParagraph = range.start,
+                    absoluteOffset = paragraph.absoluteStart + range.start
+                ),
+                word = paragraph.text.substring(range.start, range.endExclusive)
+            )
+        }
+    }
+
+    fun previousSearchMatch() = moveSearchMatch(previous = true)
+
+    fun nextSearchMatch() = moveSearchMatch(previous = false)
+
+    private fun moveSearchMatch(previous: Boolean) {
+        val state = mutableSearchState.value
+        if (state.matches.isEmpty()) return
+        val current = state.activeMatchIndex ?: 0
+        val next = if (previous) {
+            (current - 1 + state.matches.size) % state.matches.size
+        } else {
+            (current + 1) % state.matches.size
+        }
+        val match = state.matches[next]
+        mutableSearchState.value = state.copy(activeMatchIndex = next)
+        navigateToSearchMatch(match)
+    }
+
+    private fun navigateToSearchMatch(match: ReaderSearchMatch) {
+        if (mutableReadMode.value) {
+            seekVisualToAbsoluteOffset(match.position.absoluteOffset)
+        } else {
+            seekTo(match.position)
+        }
+    }
+
     fun load(id: DocumentId) {
         if (pageRequest.value == id) return
         viewModelScope.launch {
@@ -355,6 +526,8 @@ class ReaderViewModel @Inject constructor(
             mutableJumpTarget.value = null
             mutableTextJumpTarget.value = null
             mutableActiveWordAnchor.value = null
+            clearSearch()
+            dismissWordAction()
             val savedProgress = observeReadingProgress.execute(id).first()
             initialParagraph.value = savedProgress?.position?.paragraphIndex ?: 0
             pageRequest.value = id
@@ -464,20 +637,61 @@ class ReaderViewModel @Inject constructor(
                 offsetInParagraph = offset,
                 absoluteOffset = paragraph.absoluteStart + offset
             )
-            setVisualStart(position)
-            checkpointVisualProgress(position, immediately = true)
-            val reading = mutableEpubReading.value
-            if (reading == null) {
-                mutableTextJumpTarget.value = position
-                return@launch
-            }
-            val targetSpine = paragraph.sectionIndex + reading.coverOffset
-            if (targetSpine != reading.currentSpineIndex) {
-                openSpineItem(targetSpine, narrationJump = position)
+            moveVisualCursor(id, paragraph, position)
+        }
+    }
+
+    /** Stops any current playback and starts audible narration at [position]. */
+    fun startNarrationAt(position: DocumentPosition) {
+        if (mutableReadMode.value) exitReadMode()
+        mutableTextJumpTarget.value = position
+        pauseNarration.execute()
+        seekNarration.execute(position)
+        startOrResumeNarration.execute()
+    }
+
+    /** Switches to Read Mode if necessary and starts visual reading at [position]. */
+    fun startVisualReadingAt(position: DocumentPosition) {
+        val id = pageRequest.value ?: return
+        val isEpub = document.value?.mimeType == EPUB_MIME_TYPE
+        if (!mutableReadMode.value) {
+            mutableReadMode.value = true
+            pauseNarration.execute()
+        }
+        stopVisualReading(clearCursor = true)
+        viewModelScope.launch {
+            if (pageRequest.value != id || !mutableReadMode.value) return@launch
+            val paragraph = contentRepository.paragraph(id, position.paragraphIndex) ?: return@launch
+            if (isEpub && mutableEpubReading.value == null) {
+                setVisualStart(position)
+                checkpointVisualProgress(position, immediately = true)
+                enterEpubReadMode(id, position)
             } else {
-                resolveNarrationJump(id, reading.content?.blocks, position)
-                    ?.let { target -> mutableJumpTarget.value = target }
+                moveVisualCursor(id, paragraph, position)
             }
+            if (pageRequest.value == id && mutableReadMode.value) toggleVisualReading()
+        }
+    }
+
+    /** Applies a visual cursor position and brings the matching reader content into view. */
+    private suspend fun moveVisualCursor(
+        id: DocumentId,
+        paragraph: Paragraph,
+        position: DocumentPosition
+    ) {
+        setVisualStart(position)
+        checkpointVisualProgress(position, immediately = true)
+        val reading = mutableEpubReading.value
+        if (reading == null) {
+            mutableTextJumpTarget.value = position
+            return
+        }
+        val targetSpine = paragraph.sectionIndex + reading.coverOffset
+        if (targetSpine != reading.currentSpineIndex) {
+            openSpineItem(targetSpine, narrationJump = position)
+        } else {
+            resolveNarrationJump(id, reading.content?.blocks, position)
+                ?.let { target -> mutableJumpTarget.value = target }
         }
     }
 
@@ -998,6 +1212,8 @@ private data class VisualProgressCheckpoint(
 
 private const val EPUB_IMAGE_CACHE_MAX_BYTES = 8 * 1024 * 1024
 private const val VISUAL_PROGRESS_CHECKPOINT_INTERVAL_MS = 1_000L
+private const val SEARCH_PARAGRAPH_LIMIT = 300
+private const val SEARCH_MATCH_LIMIT = 500
 
 private fun NarrationState.documentIdOrNull(): DocumentId? = when (this) {
     is NarrationState.Preparing -> documentId
