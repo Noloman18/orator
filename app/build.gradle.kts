@@ -39,7 +39,7 @@ android {
         applicationId = "com.noloxtreme.tts.reader"
         minSdk = 24
         targetSdk = 37
-        versionCode = 11
+        versionCode = 12
         versionName = "1.6.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
