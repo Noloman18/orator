@@ -1,0 +1,1 @@
+• Fixed translation incorrectly appearing unavailable in the Play Store release.

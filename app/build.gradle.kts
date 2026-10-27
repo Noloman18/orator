@@ -39,10 +39,11 @@ android {
         applicationId = "com.noloxtreme.tts.reader"
         minSdk = 24
         targetSdk = 37
-        versionCode = 14
-        versionName = "1.6.4"
+        versionCode = 15
+        versionName = "1.6.5"
 
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner = providers.gradleProperty("orator.testRunner")
+            .getOrElse("androidx.test.runner.AndroidJUnitRunner")
     }
 
     buildTypes {
@@ -73,6 +74,8 @@ android {
     testOptions {
         unitTests.isIncludeAndroidResources = true
     }
+    // Exercise the optimized, signed app when checking reflection-based SDK startup.
+    testBuildType = providers.gradleProperty("orator.testBuildType").getOrElse("debug")
 }
 
 dependencies {

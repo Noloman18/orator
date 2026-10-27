@@ -1,0 +1,6 @@
+# ML Kit discovers these registrars through manifest metadata, then constructs
+# them by reflection. Its dependency rules retain the classes but R8 full mode
+# also needs an explicit rule for their public no-argument constructors.
+-keepclassmembers class * implements com.google.firebase.components.ComponentRegistrar {
+    public <init>();
+}

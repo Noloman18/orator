@@ -72,6 +72,18 @@ The signed `.aab` is copied to `app/release/app-release.aab`.
 If the environment variables are not set, the task fails with a clear error
 message. Debug builds and unsigned release builds are unaffected.
 
+Translation startup also needs a check against the optimized app. With an
+emulator or test device connected, run:
+
+```bash
+./gradlew :app:connectedReleaseAndroidTest -Porator.testBuildType=release \
+  -Porator.testRunner=com.noloxtreme.tts.reader.TranslationReleaseStartupInstrumentation
+```
+
+This verifies that the packaged ML Kit components can be created through
+reflection. The release keep rules preserve their constructors; checking only
+the debug build does not exercise release optimization.
+
 ## Code coverage
 
 Generate the aggregate JaCoCo HTML and XML reports from the JVM and Android
