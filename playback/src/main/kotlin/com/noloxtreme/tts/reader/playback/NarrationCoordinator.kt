@@ -199,7 +199,8 @@ class NarrationCoordinator @Inject constructor(
             languageTag = currentDocument.languageTag,
             voiceName = settings.voiceName,
             rate = settings.speechRate,
-            pitch = settings.speechPitch
+            pitch = settings.speechPitch,
+            requireLanguageMatch = currentDocument.translationSourceId != null
         )
         activeConfiguration = configuration
         when (speechEngine.initialize(configuration)) {

@@ -39,8 +39,8 @@ android {
         applicationId = "com.noloxtreme.tts.reader"
         minSdk = 24
         targetSdk = 37
-        versionCode = 12
-        versionName = "1.6.2"
+        versionCode = 13
+        versionName = "1.6.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -100,9 +100,11 @@ dependencies {
     implementation(libs.androidx.hilt.android)
     implementation(libs.androidx.coroutines.android)
     implementation(libs.google.mobile.ads)
+    implementation(libs.mlkit.translate)
     ksp(libs.androidx.hilt.compiler)
     ksp(libs.androidx.hilt.work.compiler)
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.androidx.compose.ui.test.junit4)

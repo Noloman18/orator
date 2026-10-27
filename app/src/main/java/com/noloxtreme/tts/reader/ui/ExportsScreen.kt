@@ -46,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -69,6 +70,7 @@ fun ExportsScreen(
     viewModel: ExportsViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val items by viewModel.items.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     var itemToDelete by remember { mutableStateOf<ExportItem?>(null) }
@@ -76,7 +78,7 @@ fun ExportsScreen(
     LaunchedEffect(Unit) { viewModel.refresh() }
     LaunchedEffect(Unit) {
         viewModel.deleteFailed.collect {
-            snackbarHostState.showSnackbar(context.getString(R.string.exports_error_delete))
+            snackbarHostState.showSnackbar(resources.getString(R.string.exports_error_delete))
         }
     }
 
@@ -169,7 +171,7 @@ fun ExportsScreen(
                                             .setType("audio/mp4")
                                             .putExtra(Intent.EXTRA_STREAM, Uri.parse(item.contentUri))
                                             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
-                                        context.getString(R.string.exports_share)
+                                        resources.getString(R.string.exports_share)
                                     )
                                 )
                             }

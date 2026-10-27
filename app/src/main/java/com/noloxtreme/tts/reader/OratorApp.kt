@@ -51,6 +51,7 @@ import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.SkipNext
 import androidx.compose.material.icons.outlined.SkipPrevious
 import androidx.compose.material.icons.outlined.Toc
+import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -122,6 +123,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -151,6 +155,10 @@ import com.noloxtreme.tts.reader.designsystem.R as DesignSystemR
 import com.noloxtreme.tts.reader.export.R as ExportR
 import com.noloxtreme.tts.reader.playback.NarrationService
 import com.noloxtreme.tts.reader.ui.AppViewModel
+import com.noloxtreme.tts.reader.ui.translation.TranslationAttribution
+import com.noloxtreme.tts.reader.ui.translation.TranslationSheet
+import com.noloxtreme.tts.reader.ui.translation.TranslationUiState
+import com.noloxtreme.tts.reader.ui.translation.TranslationViewModel
 import com.noloxtreme.tts.reader.ui.ExportMessage
 import com.noloxtreme.tts.reader.ui.ExportsScreen
 import com.noloxtreme.tts.reader.ui.LibraryViewModel
@@ -260,7 +268,8 @@ fun OratorApp(appViewModel: AppViewModel = hiltViewModel()) {
                         documentId = DocumentId(entry.arguments?.getString("documentId").orEmpty()),
                         onBack = { navController.popBackStack() },
                         onOpenSettings = { navController.navigate(SETTINGS_ROUTE) },
-                        onOpenExports = { navController.navigate(EXPORTS_ROUTE) }
+                        onOpenExports = { navController.navigate(EXPORTS_ROUTE) },
+                        onOpenDocument = { translatedId -> navController.navigate("reader/${translatedId.value}") }
                     )
                 }
                 composable(SETTINGS_ROUTE) {
@@ -632,12 +641,28 @@ private fun ReaderScreen(
     onBack: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenExports: () -> Unit,
-    viewModel: ReaderViewModel = hiltViewModel()
+    onOpenDocument: (DocumentId) -> Unit,
+    viewModel: ReaderViewModel = hiltViewModel(),
+    translationViewModel: TranslationViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val hostView = LocalView.current
     val scope = rememberCoroutineScope()
     val document by viewModel.document.collectAsState()
+    val translation by translationViewModel.state.collectAsState()
+    var translationSheetVisible by rememberSaveable(documentId) { mutableStateOf(false) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(document) {
+        document?.let(translationViewModel::prepare)
+    }
+    DisposableEffect(lifecycleOwner, translationViewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) translationViewModel.refresh()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     val loadState by viewModel.loadState.collectAsState()
     val progress by viewModel.progress.collectAsState()
     val settings by viewModel.settings.collectAsState()
@@ -743,13 +768,13 @@ private fun ReaderScreen(
         viewModel.exportMessages.collect { message ->
             when (message) {
                 ExportMessage.Started -> exportSnackbar.showSnackbar(
-                    message = context.getString(R.string.export_started_notice),
+                    message = resources.getString(R.string.export_started_notice),
                     duration = SnackbarDuration.Long
                 )
                 is ExportMessage.Succeeded -> {
                     val result = exportSnackbar.showSnackbar(
-                        message = context.getString(R.string.export_succeeded, message.displayName),
-                        actionLabel = context.getString(R.string.view),
+                        message = resources.getString(R.string.export_succeeded, message.displayName),
+                        actionLabel = resources.getString(R.string.view),
                         duration = SnackbarDuration.Long
                     )
                     if (result == SnackbarResult.ActionPerformed) {
@@ -763,7 +788,7 @@ private fun ReaderScreen(
                     }
                 }
                 is ExportMessage.Failed -> exportSnackbar.showSnackbar(
-                    context.getString(
+                    resources.getString(
                         R.string.export_failed_reason,
                         exportErrorMessage(context, message.error) +
                             message.detail
@@ -778,7 +803,7 @@ private fun ReaderScreen(
     LaunchedEffect(Unit) {
         viewModel.noteMessages.collect { message ->
             exportSnackbar.showSnackbar(
-                context.getString(
+                resources.getString(
                     when (message) {
                         com.noloxtreme.tts.reader.ui.NoteMessage.Saved -> R.string.note_saved
                         com.noloxtreme.tts.reader.ui.NoteMessage.Failed -> R.string.note_save_failed
@@ -1013,6 +1038,11 @@ private fun ReaderScreen(
                         }
                         ExportAndSettingsMenu(
                             exportState = exportState,
+                            translation = translation,
+                            onTranslate = {
+                                translationViewModel.refresh()
+                                translationSheetVisible = true
+                            },
                             onExport = requestExport,
                             onCancelExport = viewModel::cancelExport,
                             onMakeNote = {
@@ -1029,37 +1059,44 @@ private fun ReaderScreen(
         },
         snackbarHost = { SnackbarHost(exportSnackbar) },
         bottomBar = {
-            if ((!inReadMode || chromeVisible) && loadState == ReaderLoadState.Ready) {
-                ReaderControls(
-                    narration = narration,
-                    playing = playing,
-                    transport = transport,
-                    reading = inReadMode,
-                    speechRate = settings.speechRate,
-                    visualReadingPace = visualReading.pace,
-                    visualReadingUnit = visualReading.unit,
-                    visualReadingCompleted = visualReading.completed,
-                    onToggleVisualUnit = viewModel::toggleVisualReadingUnit,
-                    onPlay = {
-                        if (inReadMode) {
-                            viewModel.toggleVisualReading()
-                        } else {
-                            if (!playing) {
-                            // Start while the reader is visible. Media3 promotes the service to
-                            // foreground in sync with playback, avoiding the platform's five-second
-                            // foreground-service deadline before narration has entered Playing.
-                            startNarrationService()
-                            }
-                            if (narration is NarrationState.Completed) {
-                                viewModel.restart()
-                            } else if (playing) {
-                                viewModel.pause()
+            Column {
+                if (document?.translationSourceId != null) {
+                    TranslationAttribution(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 6.dp)
+                    )
+                }
+                if ((!inReadMode || chromeVisible) && loadState == ReaderLoadState.Ready) {
+                    ReaderControls(
+                        narration = narration,
+                        playing = playing,
+                        transport = transport,
+                        reading = inReadMode,
+                        speechRate = settings.speechRate,
+                        visualReadingPace = visualReading.pace,
+                        visualReadingUnit = visualReading.unit,
+                        visualReadingCompleted = visualReading.completed,
+                        onToggleVisualUnit = viewModel::toggleVisualReadingUnit,
+                        onPlay = {
+                            if (inReadMode) {
+                                viewModel.toggleVisualReading()
                             } else {
-                                viewModel.play()
+                                if (!playing) {
+                                // Start while the reader is visible. Media3 promotes the service to
+                                // foreground in sync with playback, avoiding the platform's five-second
+                                // foreground-service deadline before narration has entered Playing.
+                                startNarrationService()
+                                }
+                                if (narration is NarrationState.Completed) {
+                                    viewModel.restart()
+                                } else if (playing) {
+                                    viewModel.pause()
+                                } else {
+                                    viewModel.play()
+                                }
                             }
                         }
-                    }
-                )
+                    )
+                }
             }
         }
     ) { padding ->
@@ -1163,7 +1200,7 @@ private fun ReaderScreen(
                                         error = error.code,
                                         onRetry = viewModel::play,
                                         onOpenTtsSettings = {
-                                            context.startActivity(android.content.Intent("android.settings.TTS_SETTINGS"))
+                                            openDeviceSpeechSettings(context)
                                         }
                                     )
                                 }
@@ -1323,6 +1360,31 @@ private fun ReaderScreen(
             onDismiss = { showBookNotes = false }
         )
     }
+    if (translationSheetVisible) {
+        TranslationSheet(
+            state = translation,
+            onSourceChange = translationViewModel::selectSource,
+            onTargetChange = translationViewModel::selectTarget,
+            onTranslate = { allowMobileData ->
+                viewModel.captureNotePositionAndPause()
+                translationViewModel.translate(allowMobileData)
+            },
+            onCancel = translationViewModel::cancel,
+            onRefresh = translationViewModel::refresh,
+            onOpenSpeechSettings = {
+                openDeviceSpeechSettings(context)
+            },
+            onOpenDocument = { translatedId ->
+                translationSheetVisible = false
+                translationViewModel.clearResult()
+                onOpenDocument(translatedId)
+            },
+            onDismiss = {
+                if (translation.busy) translationViewModel.cancel()
+                translationSheetVisible = false
+            }
+        )
+    }
     wordActionTarget?.let { target ->
         AlertDialog(
             onDismissRequest = viewModel::dismissWordAction,
@@ -1424,6 +1486,7 @@ private fun NoteComposerDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val recorder = remember(context) { VoiceNoteRecorder(context) }
     val handedOff = remember { mutableStateOf(false) }
     var text by rememberSaveable { mutableStateOf("") }
@@ -1435,14 +1498,14 @@ private fun NoteComposerDialog(
         voiceRecording?.file?.delete()
         voiceRecording = null
         isRecording = recorder.start()
-        recordingError = if (isRecording) null else context.getString(R.string.note_recording_failed)
+        recordingError = if (isRecording) null else resources.getString(R.string.note_recording_failed)
     }
 
     val microphonePermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) startRecording()
-        else recordingError = context.getString(R.string.note_microphone_permission_needed)
+        else recordingError = resources.getString(R.string.note_microphone_permission_needed)
     }
 
     DisposableEffect(recorder) {
@@ -1483,7 +1546,7 @@ private fun NoteComposerDialog(
                         voiceRecording = recorder.stop()
                         isRecording = false
                         if (voiceRecording == null) {
-                            recordingError = context.getString(R.string.note_recording_failed)
+                            recordingError = resources.getString(R.string.note_recording_failed)
                         }
                     }) {
                         Text(stringResource(R.string.note_stop_recording))
@@ -2040,7 +2103,7 @@ private fun SettingsScreen(
                         )
                         Spacer(Modifier.height(8.dp))
                         OutlinedButton(onClick = {
-                            context.startActivity(android.content.Intent("android.settings.TTS_SETTINGS"))
+                            openDeviceSpeechSettings(context)
                         }) {
                             Text(stringResource(R.string.install_voice_data))
                         }
@@ -2248,6 +2311,8 @@ private fun LibraryMoreMenu(onOpenSettings: () -> Unit, onOpenExports: () -> Uni
 @Composable
 private fun ExportAndSettingsMenu(
     exportState: ExportState,
+    translation: TranslationUiState,
+    onTranslate: () -> Unit,
     onExport: () -> Unit,
     onCancelExport: () -> Unit,
     onMakeNote: () -> Unit,
@@ -2256,6 +2321,8 @@ private fun ExportAndSettingsMenu(
     onOpenSettings: () -> Unit
 ) {
     var menuOpen by remember { mutableStateOf(false) }
+    val translationAvailable = !translation.checking && translation.unavailable == null &&
+        translation.languages.size >= 2
     Box {
         IconButton(onClick = { menuOpen = true }) {
             Icon(Icons.Outlined.MoreVert, contentDescription = stringResource(R.string.more_actions))
@@ -2275,6 +2342,38 @@ private fun ExportAndSettingsMenu(
                     onOpenNotes()
                 }
             )
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = {
+                    Column {
+                        Text(stringResource(R.string.reader_translation_action))
+                        if (!translationAvailable) {
+                            Text(
+                                stringResource(
+                                    if (translation.checking) R.string.reader_translation_checking
+                                    else R.string.reader_translation_unavailable
+                                ),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                },
+                leadingIcon = { Icon(Icons.Outlined.Translate, contentDescription = null) },
+                enabled = translationAvailable,
+                onClick = {
+                    menuOpen = false
+                    onTranslate()
+                }
+            )
+            if (!translation.checking && translation.unavailable != null) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.reader_translation_availability)) },
+                    onClick = {
+                        menuOpen = false
+                        onTranslate()
+                    }
+                )
+            }
             HorizontalDivider()
             val exporting = exportState is ExportState.Enqueued ||
                 exportState is ExportState.Running
@@ -2325,6 +2424,12 @@ private fun exportErrorMessage(error: ExportError): String = exportErrorMessage(
     LocalContext.current,
     error
 )
+
+/** Speech settings actions differ between Android vendors. */
+private fun openDeviceSpeechSettings(context: Context) {
+    listOf("com.android.settings.TTS_SETTINGS", "android.settings.TTS_SETTINGS", android.provider.Settings.ACTION_SETTINGS)
+        .any { action -> runCatching { context.startActivity(Intent(action)) }.isSuccess }
+}
 
 private fun exportErrorMessage(context: Context, error: ExportError): String = when (error) {
     ExportError.DOCUMENT_MISSING -> context.getString(ExportR.string.export_error_document_missing)

@@ -32,6 +32,19 @@ Pick your voice, set speech rate and pitch, preview a voice, and play, pause,
 replay, step sentence by sentence, or rewind and fast-forward five sentences.
 Control playback from the reader or from the playback notification.
 
+**Translate and keep reading.** Create a translated text copy in your library,
+keeping the original. Orator checks your device and offers only translation
+languages with an installed offline TTS voice, for both the source and target.
+Read, listen to, or export the translated copy with a matching voice. Missing
+language packs download over Wi-Fi first, with an optional mobile-data setting;
+once installed, they work offline. Chapter divisions are retained; original
+images and page styling are not copied.
+
+Machine translation is powered by Google Translate using on-device models.
+Automatic translations can contain errors. Learn more about Cloud Translation:
+https://cloud.google.com/translate and Google's attribution requirements:
+https://docs.cloud.google.com/translate/attribution.
+
 **Save books as audio.** Export an entire book to a single AAC (.m4a) audio file
 right from the reader. Exports run in the background — even if you leave the app
 or your device reboots — show live progress, and can be cancelled. Finished files

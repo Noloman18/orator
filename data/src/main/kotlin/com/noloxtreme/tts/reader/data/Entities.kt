@@ -21,7 +21,8 @@ data class DocumentEntity(
     val totalCharacterCount: Long,
     val sectionCount: Int,
     val importedAt: Long,
-    val lastOpenedAt: Long?
+    val lastOpenedAt: Long?,
+    val translationSourceId: String? = null
 )
 
 @Entity(

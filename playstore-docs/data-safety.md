@@ -21,12 +21,31 @@ Before publishing, audit the resulting AAB, configure and test the applicable UM
 consent and privacy-options flow, and complete the Data safety form from Google's
 current guidance.
 
+### On-device translation SDK
+
+The app also bundles `com.google.mlkit:translate:17.0.3`. Text and translated output
+are processed locally, while language-pack downloads and SDK diagnostics use the
+network. Google's [ML Kit disclosure](https://developers.google.com/ml-kit/android-data-disclosure)
+lists device/app information, installation identifiers, performance/configuration
+metrics, input/output sizes, events/errors, and source/target languages for
+diagnostics and usage analytics. Include these in the submitted build's answers;
+local translation does not imply that the SDK collects no data. ML Kit encrypts
+these metrics with HTTPS and reports no third-party transfer.
+
+Translate also uses Firebase Remote Config and Installations. Account for their
+installation identifiers and device/app configuration metadata using the
+[Firebase disclosure](https://firebase.google.com/docs/android/play-data-disclosure#remote-config).
+Source text and translated text are not uploaded, as confirmed by
+[ML Kit's privacy terms](https://developers.google.com/ml-kit/terms#privacy).
+
 ### Data types handled locally but not transmitted
 
 These are useful for reviewing the form, but should not be marked as collected or
 shared under Google's off-device definition unless a future version transmits them:
 
 - Files and documents: imported document content and filenames.
+- Translations: document text and saved translated copies; translation inference
+  runs on the device after the required language packs have downloaded.
 - App activity: library state, reading position, reader settings, and typed notes.
 - Audio-related processing: text is passed to the installed text-to-speech engine;
   voice notes are recorded only when the user starts recording and are kept in
@@ -42,6 +61,9 @@ shared under Google's off-device definition unless a future version transmits th
 - Users can delete imported documents from the library, which also removes their
   associated typed and voice notes. Uninstalling the app removes app-private data;
   there is no developer-held account data to delete.
+- Translated copies are deleted independently of their originals. Language packs
+  remain available for other books until app data is cleared or Orator is
+  uninstalled.
 
 ## Console reminders
 

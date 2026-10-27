@@ -3,6 +3,32 @@
 Orator is a Kotlin/Compose Android app for reading documents aloud with the
 device's text-to-speech engine.
 
+## Translation
+
+Open a book's reader menu and choose **Translate book** to create a separate
+translated text copy in the library. The original stays intact. The copy retains
+chapter divisions and supports reading, narration, notes, and audio export; EPUB
+images and page styling are not copied.
+
+Orator checks the device before enabling translation. Both the source and target
+language must be supported by translation and have an installed offline TTS voice.
+Cloud voices and voices whose data is still downloading do not qualify. The
+availability screen links to Android voice settings and lets users check again.
+Translated copies always use a voice matching their target language.
+
+Translation runs locally using ML Kit Translate 17.0.3. On first use, missing
+language packs download over Wi-Fi unless the user enables mobile data. Once the
+packs are installed, translation works offline. Progress, cancellation, and retry
+states are shown in the translation sheet.
+
+Machine translation is powered by [Google Translate](https://translate.google.com),
+using its on-device models. Automatic translations can contain errors. See
+[Cloud Translation](https://cloud.google.com/translate) and Google's
+[attribution requirements](https://docs.cloud.google.com/translate/attribution).
+The reader and translation sheet display Google Translate attribution. Input
+text and translated text stay on the device; the SDK can send diagnostics and
+usage metrics, as described in the [privacy policy](playstore-docs/privacy-policy.md).
+
 ## Prerequisites
 
 - JDK 17 or newer

@@ -17,7 +17,9 @@ data class Document(
     val totalCharacterCount: Long,
     val sectionCount: Int,
     val importedAtEpochMillis: Long,
-    val lastOpenedAtEpochMillis: Long?
+    val lastOpenedAtEpochMillis: Long?,
+    /** Provenance for a translated copy; retained if its original is removed. */
+    val translationSourceId: DocumentId? = null
 )
 
 data class Section(

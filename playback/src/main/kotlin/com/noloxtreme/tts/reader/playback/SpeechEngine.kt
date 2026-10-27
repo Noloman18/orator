@@ -23,7 +23,9 @@ data class SpeechConfiguration(
     val languageTag: String?,
     val voiceName: String?,
     val rate: Float,
-    val pitch: Float
+    val pitch: Float,
+    /** Translations must use a voice in the translated language, including during export. */
+    val requireLanguageMatch: Boolean = false
 )
 
 data class SpeechSegment(
@@ -81,6 +83,7 @@ class AndroidTtsEngine @Inject constructor(
     private var engine: TextToSpeech? = null
     private var initialized = false
     private var initializationStatus: Int = TextToSpeech.ERROR
+    private var engineInitialization: CompletableDeferred<Unit>? = null
 
     override val events: Flow<SpeechEvent> = eventBus
 
@@ -114,6 +117,11 @@ class AndroidTtsEngine @Inject constructor(
         if (tts.voice?.isUsableOffline() != true) {
             return SpeechInitialization.LanguageUnavailable
         }
+        if (configuration.requireLanguageMatch &&
+            !VoiceResolver.sameLanguage(tts.voice?.locale?.toLanguageTag(), configuration.languageTag)
+        ) {
+            return SpeechInitialization.LanguageUnavailable
+        }
         tts.setSpeechRate(configuration.rate.coerceIn(0.5f, 2.0f))
         tts.setPitch(configuration.pitch.coerceIn(0.5f, 2.0f))
         initialized = true
@@ -144,6 +152,9 @@ class AndroidTtsEngine @Inject constructor(
         initialized = false
         engine?.shutdown()
         engine = null
+        engineInitialization?.complete(Unit)
+        engineInitialization = null
+        initializationStatus = TextToSpeech.ERROR
     }
 
     override suspend fun availableOfflineVoices(): List<VoiceInfo> {
@@ -173,8 +184,19 @@ class AndroidTtsEngine @Inject constructor(
     }
 
     private suspend fun ensureEngine(): TextToSpeech? = withContext(Dispatchers.Main.immediate) {
-        engine?.let { return@withContext it }
+        engine?.let { existing ->
+            // Capability checks and narration can arrive while onInit is still
+            // pending. Both callers must await the same initialization result.
+            val ready = withTimeoutOrNull(TTS_INITIALIZATION_TIMEOUT_MS) {
+                engineInitialization?.await()
+                initializationStatus == TextToSpeech.SUCCESS
+            } == true
+            if (ready && engine === existing) return@withContext existing
+            if (engine === existing) shutdown()
+            return@withContext null
+        }
         val completion = CompletableDeferred<Unit>()
+        engineInitialization = completion
         var created: TextToSpeech? = null
         created = TextToSpeech(context) { status ->
                 initializationStatus = status
@@ -214,10 +236,9 @@ class AndroidTtsEngine @Inject constructor(
             completion.await()
             engine
         }
-        if (resolved == null) {
-            created?.shutdown()
-            engine = null
-            initialized = false
+        if (resolved == null || initializationStatus != TextToSpeech.SUCCESS) {
+            if (engine === created) shutdown()
+            return@withContext null
         }
         resolved
     }
@@ -237,7 +258,8 @@ class AndroidTtsEngine @Inject constructor(
                 )
             },
             requestedName = configuration.voiceName,
-            languageTag = configuration.languageTag
+            languageTag = configuration.languageTag,
+            requireLanguageMatch = configuration.requireLanguageMatch
         )
         selected?.let { selection -> voices.firstOrNull { it.name == selection.name } }
     }

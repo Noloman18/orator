@@ -104,7 +104,8 @@ class AudioExportWorker @AssistedInject constructor(
                 languageTag = document.languageTag,
                 voiceName = settings.voiceName,
                 rate = settings.speechRate,
-                pitch = settings.speechPitch
+                pitch = settings.speechPitch,
+                requireLanguageMatch = document.translationSourceId != null
             )
             updateProgress(0, document.title, documentId.value, ExportStage.SYNTHESIZING)
             when (synthesizer.initialize(configuration)) {

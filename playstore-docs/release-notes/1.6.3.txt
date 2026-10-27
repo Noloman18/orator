@@ -1,0 +1,3 @@
+• Translate books between languages with installed offline voices, keeping the original and saving a translated copy.
+• Download language packs once, then translate on your device offline.
+• Check device support and get voice setup guidance before translating.

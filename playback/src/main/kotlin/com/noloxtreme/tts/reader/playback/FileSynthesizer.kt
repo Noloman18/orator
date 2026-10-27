@@ -65,6 +65,11 @@ class AndroidTtsFileSynthesizer @Inject constructor(
         if (tts.voice?.isUsableOffline() != true) {
             return SpeechInitialization.LanguageUnavailable
         }
+        if (configuration.requireLanguageMatch &&
+            !VoiceResolver.sameLanguage(tts.voice?.locale?.toLanguageTag(), configuration.languageTag)
+        ) {
+            return SpeechInitialization.LanguageUnavailable
+        }
         tts.setSpeechRate(configuration.rate.coerceIn(0.5f, 2.0f))
         tts.setPitch(configuration.pitch.coerceIn(0.5f, 2.0f))
         initialized = true
@@ -158,7 +163,8 @@ class AndroidTtsFileSynthesizer @Inject constructor(
                 )
             },
             requestedName = configuration.voiceName,
-            languageTag = configuration.languageTag
+            languageTag = configuration.languageTag,
+            requireLanguageMatch = configuration.requireLanguageMatch
         )
         selected?.let { selection -> voices.firstOrNull { it.name == selection.name } }
     }

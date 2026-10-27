@@ -266,7 +266,8 @@ private fun DocumentEntity.toDomain() = Document(
     totalCharacterCount = totalCharacterCount,
     sectionCount = sectionCount,
     importedAtEpochMillis = importedAt,
-    lastOpenedAtEpochMillis = lastOpenedAt
+    lastOpenedAtEpochMillis = lastOpenedAt,
+    translationSourceId = translationSourceId?.let(::DocumentId)
 )
 
 private fun SectionEntity.toDomain() = Section(

@@ -27,12 +27,15 @@ object VoiceResolver {
     fun select(
         voices: List<VoiceInfo>,
         requestedName: String?,
-        languageTag: String?
+        languageTag: String?,
+        requireLanguageMatch: Boolean = false
     ): VoiceInfo? {
         val offline = offlineVoices(voices)
         if (offline.isEmpty()) return null
         requestedName?.takeIf { it.isNotBlank() }?.let { name ->
-            offline.firstOrNull { it.name == name }?.let { return it }
+            offline.firstOrNull {
+                it.name == name && (!requireLanguageMatch || sameLanguage(it.localeLanguageTag, languageTag))
+            }?.let { return it }
         }
         val language = languageTag
             ?.takeIf { it.isNotBlank() }
@@ -41,7 +44,24 @@ object VoiceResolver {
             ?: return null
         offline.firstOrNull { it.localeLanguageTag == language.toLanguageTag() }?.let { return it }
         return offline.firstOrNull {
-            it.localeLanguageTag.substringBefore('-') == language.language
+            sameLanguage(it.localeLanguageTag, language.toLanguageTag())
         }
+    }
+
+    /** Android engines sometimes report legacy ISO codes or Mandarin's language code. */
+    fun sameLanguage(first: String?, second: String?): Boolean {
+        val language = canonicalLanguage(first)
+        return language.isNotEmpty() && language == canonicalLanguage(second)
+    }
+
+    private fun canonicalLanguage(tag: String?): String = when (
+        val language = tag?.replace('_', '-')?.let(Locale::forLanguageTag)?.language.orEmpty()
+    ) {
+        "iw" -> "he"
+        "in" -> "id"
+        "nb" -> "no"
+        "fil" -> "tl"
+        "cmn" -> "zh"
+        else -> language
     }
 }

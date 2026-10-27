@@ -3,6 +3,13 @@ package com.noloxtreme.tts.reader.data
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
+/** Version 3 → 4: records translation provenance without cascading original deletion. */
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `documents` ADD COLUMN `translationSourceId` TEXT")
+    }
+}
+
 /**
  * Version 1 → 2: adds the reader_positions table that persists where the
  * visual read mode was left (spine item and packed page) per document.

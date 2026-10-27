@@ -70,13 +70,14 @@ class NarrationCoordinatorTest {
 
     private fun TestScope.harness(
         progress: ReadingProgress? = null,
-        completed: Boolean = false
+        completed: Boolean = false,
+        currentDocument: Document = document
     ): Harness {
         val engine = FakeSpeechEngine()
         val focus = FakeAudioFocus()
         val environment = FakeNarrationEnvironment()
         val clock = FakeClock()
-        val documents = FakeDocumentRepository(mutableMapOf(documentId.value to document))
+        val documents = FakeDocumentRepository(mutableMapOf(documentId.value to currentDocument))
         val content = FakeContentRepository(listOf(firstParagraph, secondParagraph))
         val initialProgress = progress ?: ReadingProgress(
             documentId = documentId,
@@ -98,6 +99,63 @@ class NarrationCoordinatorTest {
             coordinatorContext = StandardTestDispatcher(testScheduler)
         )
         return Harness(engine, focus, environment, clock, documents, content, progressRepo, settings, coordinator)
+    }
+
+    @Test
+    fun translatedCopyRequiresVoiceMatchingItsTargetLanguage() = runTest {
+        val h = harness(
+            currentDocument = document.copy(
+                languageTag = "fr",
+                translationSourceId = DocumentId("english-original")
+            )
+        )
+        h.settings.state.value = OratorSettings(voiceName = "saved-english-voice")
+
+        h.coordinator.dispatch(NarrationCommand.Load(documentId))
+        advanceUntilIdle()
+        h.coordinator.dispatch(NarrationCommand.Play)
+        advanceUntilIdle()
+
+        val configuration = h.engine.initializeCalls.single()
+        assertEquals("fr", configuration.languageTag)
+        assertTrue(configuration.requireLanguageMatch)
+        assertEquals("saved-english-voice", configuration.voiceName)
+        assertTrue(h.coordinator.state.value is NarrationState.Playing)
+    }
+
+    @Test
+    fun originalDocumentsKeepExplicitVoicePreferenceBehavior() = runTest {
+        val h = harness()
+        h.settings.state.value = OratorSettings(voiceName = "preferred-voice")
+
+        h.coordinator.dispatch(NarrationCommand.Load(documentId))
+        advanceUntilIdle()
+        h.coordinator.dispatch(NarrationCommand.Play)
+        advanceUntilIdle()
+
+        val configuration = h.engine.initializeCalls.single()
+        assertFalse(configuration.requireLanguageMatch)
+        assertEquals("preferred-voice", configuration.voiceName)
+    }
+
+    @Test
+    fun missingTranslationVoiceStopsPlaybackWithLanguageError() = runTest {
+        val h = harness(
+            currentDocument = document.copy(translationSourceId = DocumentId("original"))
+        )
+        h.engine.initializationResult = SpeechInitialization.LanguageUnavailable
+
+        h.coordinator.dispatch(NarrationCommand.Load(documentId))
+        advanceUntilIdle()
+        h.coordinator.dispatch(NarrationCommand.Play)
+        advanceUntilIdle()
+
+        assertTrue(h.engine.initializeCalls.single().requireLanguageMatch)
+        assertTrue(h.engine.spokenSegments.isEmpty())
+        assertEquals(
+            PlaybackError.TTS_LANGUAGE_MISSING,
+            (h.coordinator.state.value as NarrationState.Error).code
+        )
     }
 
     @Test

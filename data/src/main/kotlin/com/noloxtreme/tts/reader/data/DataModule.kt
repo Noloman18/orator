@@ -12,6 +12,7 @@ import com.noloxtreme.tts.reader.domain.ReaderPositionRepository
 import com.noloxtreme.tts.reader.domain.ReviewPromptRepository
 import com.noloxtreme.tts.reader.domain.SettingsRepository
 import com.noloxtreme.tts.reader.domain.TimeProvider
+import com.noloxtreme.tts.reader.domain.TranslatedDocumentRepository
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -24,6 +25,12 @@ import javax.inject.Singleton
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class DataBindingsModule {
+    @Binds
+    @Singleton
+    abstract fun bindTranslatedDocumentRepository(
+        implementation: RoomTranslatedDocumentRepository
+    ): TranslatedDocumentRepository
+
     @Binds
     @Singleton
     abstract fun bindDocumentRepository(implementation: RoomDocumentRepository): DocumentRepository
@@ -84,6 +91,7 @@ object DataProvidersModule {
         Room.databaseBuilder(context, OratorDatabase::class.java, "orator.db")
             .addMigrations(MIGRATION_1_2)
             .addMigrations(MIGRATION_2_3)
+            .addMigrations(MIGRATION_3_4)
             .build()
 
     @Provides

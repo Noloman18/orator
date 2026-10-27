@@ -14,7 +14,7 @@ import androidx.room.TypeConverters
         ReaderPositionEntity::class,
         BookNoteEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = true
 )
 @TypeConverters(DatabaseConverters::class)

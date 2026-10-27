@@ -48,6 +48,58 @@ class VoiceResolverTest {
     }
 
     @Test
+    fun translationIgnoresSavedVoiceInAnotherLanguage() {
+        val selected = VoiceResolver.select(voices, "eng-us-2", "fr-FR", requireLanguageMatch = true)
+
+        assertEquals("fra", selected?.name)
+    }
+
+    @Test
+    fun translationKeepsRequestedDialectInTheTargetLanguage() {
+        val selected = VoiceResolver.select(voices, "eng-gb", "en-US", requireLanguageMatch = true)
+
+        assertEquals("eng-gb", selected?.name)
+    }
+
+    @Test
+    fun translationCannotFallBackToAnUnrelatedInstalledVoice() {
+        assertNull(VoiceResolver.select(voices, "eng-us", "ja-JP", requireLanguageMatch = true))
+        assertNull(VoiceResolver.select(voices, "eng-us", null, requireLanguageMatch = true))
+    }
+
+    @Test
+    fun translationRejectsTargetVoicesThatNeedNetworkOrUninstalledData() {
+        val unavailable = listOf(
+            voice("english", "en-US"),
+            voice("french-cloud", "fr-FR", network = true),
+            voice("french-pending", "fr-CA", installed = false)
+        )
+
+        assertNull(VoiceResolver.select(unavailable, "french-cloud", "fr", requireLanguageMatch = true))
+        assertNull(VoiceResolver.select(unavailable, "french-pending", "fr", requireLanguageMatch = true))
+        assertNull(VoiceResolver.select(unavailable, "english", "fr", requireLanguageMatch = true))
+    }
+
+    @Test
+    fun translationMatchesAndroidLanguageAliases() {
+        listOf(
+            "iw-IL" to "he",
+            "in-ID" to "id",
+            "nb-NO" to "no",
+            "fil-PH" to "tl",
+            "cmn-CN" to "zh"
+        ).forEach { (voiceTag, targetTag) ->
+            val selected = VoiceResolver.select(
+                listOf(voice("target", voiceTag)), null, targetTag, requireLanguageMatch = true
+            )
+
+            assertEquals("Expected $voiceTag to match $targetTag", "target", selected?.name)
+        }
+        assertTrue(!VoiceResolver.sameLanguage("en-US", "fr"))
+        assertTrue(!VoiceResolver.sameLanguage(null, null))
+    }
+
+    @Test
     fun requestedNetworkVoiceIsIgnored() {
         val selected = VoiceResolver.select(voices, "network-en", "en-US")
 
