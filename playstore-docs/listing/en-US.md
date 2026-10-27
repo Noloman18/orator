@@ -6,7 +6,7 @@ Orator
 
 ## Short description
 
-Read and listen to documents offline, and export your books to audio.
+Read books offline, translate them, learn with both texts, and export audio.
 
 ## Full description
 
@@ -39,6 +39,14 @@ Read, listen to, or export the translated copy with a matching voice. Missing
 language packs download over Wi-Fi first, with an optional mobile-data setting;
 once installed, they work offline. Chapter divisions are retained; original
 images and page styling are not copied.
+
+**Learn while you listen.** During narration, choose Language learning to follow
+the translated passage alongside the original. The spoken translation is
+highlighted, with an approximate phrase highlight in the original because
+translations can change word order and sentence length. Scroll either pane to
+look back, then choose Follow narration to catch up. The original book must
+remain in your library. The panes stack on phones and sit side by side in
+landscape.
 
 Machine translation is powered by Google Translate using on-device models.
 Automatic translations can contain errors. Learn more about Cloud Translation:
