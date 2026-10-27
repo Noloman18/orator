@@ -16,6 +16,14 @@ Cloud voices and voices whose data is still downloading do not qualify. The
 availability screen links to Android voice settings and lets users check again.
 Translated copies always use a voice matching their target language.
 
+In a translated copy's narration menu, **Language learning** shows the current
+original and translated passage together: stacked on phones and side by side on
+wider screens. Both panes follow the translated narration. The original uses an
+approximate phrase highlight, since translations can change word order and
+sentence length. Scrolling pauses visual following; **Follow narration** catches
+both panes up without seeking the audio. The original book must remain in the
+library. This view is available only during narration, not in silent Read Mode.
+
 Translation runs locally using ML Kit Translate 17.0.3. On first use, missing
 language packs download over Wi-Fi unless the user enables mobile data. Once the
 packs are installed, translation works offline. Progress, cancellation, and retry

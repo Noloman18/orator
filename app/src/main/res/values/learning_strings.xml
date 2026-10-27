@@ -1,0 +1,21 @@
+<resources>
+    <string name="learning_title">Language learning</string>
+    <string name="learning_menu_hint">Original and translation together</string>
+    <string name="learning_close">Close language learning</string>
+    <string name="learning_original">Original</string>
+    <string name="learning_original_language">Original · %1$s</string>
+    <string name="learning_translation">Translation</string>
+    <string name="learning_translation_language">Translation · %1$s</string>
+    <string name="learning_narrated">Narrated language</string>
+    <string name="learning_approximate">Approximate position in the original</string>
+    <string name="learning_follow">Follow narration</string>
+    <string name="learning_information">About language learning</string>
+    <string name="learning_information_body">The translation is read aloud while both panes follow the same passage. The original highlight estimates your place; word order and sentence length can differ between languages. Scroll either pane to look back, then tap Follow narration to catch up.</string>
+    <string name="learning_checking_original">Finding the original…</string>
+    <string name="learning_original_missing">The original book is no longer in your library.</string>
+    <string name="learning_original_unavailable">Original text is unavailable</string>
+    <string name="learning_passage_missing">This passage could not be matched to the original. You can continue listening or return to the full narration view.</string>
+    <string name="learning_load_failed">These passages could not be loaded. Try again.</string>
+    <string name="learning_loading">Loading both languages…</string>
+    <string name="learning_back_to_narration">Back to narration</string>
+</resources>

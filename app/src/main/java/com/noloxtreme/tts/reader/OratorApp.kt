@@ -52,6 +52,7 @@ import androidx.compose.material.icons.outlined.SkipNext
 import androidx.compose.material.icons.outlined.SkipPrevious
 import androidx.compose.material.icons.outlined.Toc
 import androidx.compose.material.icons.outlined.Translate
+import androidx.compose.material.icons.outlined.ViewAgenda
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -89,6 +90,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -110,6 +112,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -155,6 +158,12 @@ import com.noloxtreme.tts.reader.designsystem.R as DesignSystemR
 import com.noloxtreme.tts.reader.export.R as ExportR
 import com.noloxtreme.tts.reader.playback.NarrationService
 import com.noloxtreme.tts.reader.ui.AppViewModel
+import com.noloxtreme.tts.reader.ui.learning.LanguageLearningPane
+import com.noloxtreme.tts.reader.ui.learning.LanguageLearningViewModel
+import com.noloxtreme.tts.reader.ui.learning.LearningSource
+import com.noloxtreme.tts.reader.ui.learning.compactLearningChrome
+import com.noloxtreme.tts.reader.ui.learning.learningPosition
+import com.noloxtreme.tts.reader.ui.learning.learningSpokenRange
 import com.noloxtreme.tts.reader.ui.translation.TranslationAttribution
 import com.noloxtreme.tts.reader.ui.translation.TranslationSheet
 import com.noloxtreme.tts.reader.ui.translation.TranslationUiState
@@ -643,7 +652,8 @@ private fun ReaderScreen(
     onOpenExports: () -> Unit,
     onOpenDocument: (DocumentId) -> Unit,
     viewModel: ReaderViewModel = hiltViewModel(),
-    translationViewModel: TranslationViewModel = hiltViewModel()
+    translationViewModel: TranslationViewModel = hiltViewModel(),
+    learningViewModel: LanguageLearningViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
     val resources = LocalResources.current
@@ -651,14 +661,21 @@ private fun ReaderScreen(
     val scope = rememberCoroutineScope()
     val document by viewModel.document.collectAsState()
     val translation by translationViewModel.state.collectAsState()
+    val learningSource by learningViewModel.source.collectAsState()
+    val learningPassage by learningViewModel.passage.collectAsState()
+    var learningEnabled by rememberSaveable(documentId) { mutableStateOf(false) }
+    var learningFollowRevision by remember(documentId) { mutableIntStateOf(0) }
     var translationSheetVisible by rememberSaveable(documentId) { mutableStateOf(false) }
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(document) {
         document?.let(translationViewModel::prepare)
     }
-    DisposableEffect(lifecycleOwner, translationViewModel) {
+    DisposableEffect(lifecycleOwner, translationViewModel, learningViewModel) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) translationViewModel.refresh()
+            if (event == Lifecycle.Event.ON_RESUME) {
+                translationViewModel.refresh()
+                if (learningViewModel.source.value == LearningSource.Failed) learningViewModel.retry()
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
@@ -669,6 +686,13 @@ private fun ReaderScreen(
     val narration by viewModel.narration.collectAsState()
     val sectionTitle by viewModel.sectionTitle.collectAsState()
     val inReadMode by viewModel.readMode.collectAsState()
+    val learningActive = learningEnabled && !inReadMode && document?.translationSourceId != null
+    val compactLearning = learningActive && compactLearningChrome()
+    val learningCursor = learningPosition(documentId, narration, progress?.position)
+    LaunchedEffect(document, learningActive, learningCursor.paragraphIndex) {
+        learningViewModel.prepare(document)
+        learningViewModel.showParagraph(learningCursor.paragraphIndex.takeIf { learningActive })
+    }
     val visualReading by viewModel.visualReading.collectAsState()
     val epubReading by viewModel.epubReading.collectAsState()
     val notes by viewModel.notes.collectAsState()
@@ -705,11 +729,11 @@ private fun ReaderScreen(
             ?: 0L
     }
 
-    // Silent Read Mode has no media session to keep the display awake. Keep it on
-    // only while its visual word pointer is moving, then restore the user's normal
-    // screen-timeout setting as soon as reading pauses, ends, or this screen closes.
-    DisposableEffect(hostView, inReadMode, visualReading.isPlaying) {
-        hostView.keepScreenOn = inReadMode && visualReading.isPlaying
+    // Both visual reading and language learning need the screen while their
+    // pointers are moving; restore the normal timeout when playback pauses.
+    DisposableEffect(hostView, inReadMode, visualReading.isPlaying, learningActive, narrationPlaying, narrationPosition != null) {
+        hostView.keepScreenOn = (inReadMode && visualReading.isPlaying) ||
+            (learningActive && narrationPlaying && narrationPosition != null)
         onDispose { hostView.keepScreenOn = false }
     }
 
@@ -838,7 +862,14 @@ private fun ReaderScreen(
     }
     LaunchedEffect(inReadMode) {
         manualScrollPosition = null
-        if (inReadMode) chromeVisible = true
+        if (inReadMode) {
+            chromeVisible = true
+            learningEnabled = false
+        }
+    }
+    LaunchedEffect(learningActive) {
+        manualScrollPosition = null
+        if (!learningActive && settings.followSpokenText) followEnabled = true
     }
     LaunchedEffect(playing) {
         if (playing) manualScrollPosition = null
@@ -853,8 +884,8 @@ private fun ReaderScreen(
             }
         }
     }
-    LaunchedEffect(currentParagraphIndex, settings.followSpokenText, followEnabled, lazyParagraphs.itemCount, sectionTitle, inReadMode) {
-        if (!inReadMode && textJumpTarget == null && settings.followSpokenText && followEnabled &&
+    LaunchedEffect(currentParagraphIndex, settings.followSpokenText, followEnabled, lazyParagraphs.itemCount, sectionTitle, inReadMode, learningActive) {
+        if (!inReadMode && !learningActive && textJumpTarget == null && settings.followSpokenText && followEnabled &&
             currentParagraphIndex >= 0 && currentParagraphIndex < lazyParagraphs.itemCount
         ) {
             val itemIndex = currentParagraphIndex + if (sectionTitle != null) 1 else 0
@@ -868,7 +899,8 @@ private fun ReaderScreen(
             }
         }
     }
-    LaunchedEffect(listState, currentParagraphIndex, inReadMode) {
+    LaunchedEffect(listState, currentParagraphIndex, inReadMode, learningActive) {
+        if (learningActive) return@LaunchedEffect
         snapshotFlow {
             listState.isScrollInProgress to listState.layoutInfo.visibleItemsInfo.map { it.key }
         }.collect { (scrolling, visibleKeys) ->
@@ -913,10 +945,16 @@ private fun ReaderScreen(
     LaunchedEffect(
         textJumpTarget,
         isEpubReadMode,
+        learningActive,
         sectionTitle,
         lazyParagraphs.itemCount
     ) {
         val target = textJumpTarget ?: return@LaunchedEffect
+        if (learningActive) {
+            learningFollowRevision++
+            viewModel.resolveTextJump()
+            return@LaunchedEffect
+        }
         if (isEpubReadMode || target.paragraphIndex !in 0 until lazyParagraphs.itemCount) {
             return@LaunchedEffect
         }
@@ -942,8 +980,8 @@ private fun ReaderScreen(
     // While playback is stopped, derive the document position from the first
     // visible text line. This updates the progress UI during the gesture and
     // commits the position when scrolling settles, in either reader mode.
-    LaunchedEffect(listState, isEpubReadMode, playing, documentId) {
-        if (isEpubReadMode || playing) return@LaunchedEffect
+    LaunchedEffect(listState, isEpubReadMode, playing, documentId, learningActive) {
+        if (isEpubReadMode || playing || learningActive) return@LaunchedEffect
         var userScrollObserved = false
         snapshotFlow {
             val layoutInfo = listState.layoutInfo
@@ -1011,6 +1049,7 @@ private fun ReaderScreen(
                                     keyboardController?.hide()
                                     viewModel.clearSearch()
                                 } else {
+                                    learningEnabled = false
                                     searchOpen = true
                                 }
                             }
@@ -1039,6 +1078,18 @@ private fun ReaderScreen(
                         ExportAndSettingsMenu(
                             exportState = exportState,
                             translation = translation,
+                            showLearning = !inReadMode && document?.translationSourceId != null,
+                            learningActive = learningActive,
+                            learningSource = learningSource,
+                            onToggleLearning = {
+                                learningEnabled = !learningActive
+                                if (learningEnabled) {
+                                    searchOpen = false
+                                    searchQuery = ""
+                                    keyboardController?.hide()
+                                    viewModel.clearSearch()
+                                }
+                            },
                             onTranslate = {
                                 translationViewModel.refresh()
                                 translationSheetVisible = true
@@ -1059,12 +1110,7 @@ private fun ReaderScreen(
         },
         snackbarHost = { SnackbarHost(exportSnackbar) },
         bottomBar = {
-            Column {
-                if (document?.translationSourceId != null) {
-                    TranslationAttribution(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 6.dp)
-                    )
-                }
+            ReaderFooter(translated = document?.translationSourceId != null, compact = compactLearning) {
                 if ((!inReadMode || chromeVisible) && loadState == ReaderLoadState.Ready) {
                     ReaderControls(
                         narration = narration,
@@ -1076,6 +1122,7 @@ private fun ReaderScreen(
                         visualReadingUnit = visualReading.unit,
                         visualReadingCompleted = visualReading.completed,
                         onToggleVisualUnit = viewModel::toggleVisualReadingUnit,
+                        onNavigate = { if (learningActive) learningFollowRevision++ },
                         onPlay = {
                             if (inReadMode) {
                                 viewModel.toggleVisualReading()
@@ -1138,6 +1185,31 @@ private fun ReaderScreen(
                     val percentage = (displayFraction * 100f)
                         .roundToInt()
                         .coerceIn(0, 100)
+                    val progressControls: @Composable () -> Unit = {
+                        ReaderProgress(
+                            percentage = percentage,
+                            compact = compactLearning,
+                            value = seekFraction,
+                            onValueChange = {
+                                isSeeking = true
+                                manualScrollPosition = null
+                                seekFraction = it
+                            },
+                            onValueChangeFinished = {
+                                val targetOffset = (
+                                    seekFraction * currentDocument.totalCharacterCount.toFloat()
+                                ).roundToLong()
+                                isSeeking = false
+                                if (settings.followSpokenText) followEnabled = true
+                                if (inReadMode) {
+                                    viewModel.seekVisualToAbsoluteOffset(targetOffset)
+                                } else {
+                                    viewModel.seekToAbsoluteOffset(targetOffset)
+                                }
+                            },
+                            enabled = currentDocument.totalCharacterCount > 0L
+                        )
+                    }
                     Box(Modifier.fillMaxSize().padding(padding)) {
                         Column(Modifier.fillMaxSize()) {
                             if (exportState is ExportState.Running || exportState is ExportState.Enqueued) {
@@ -1161,38 +1233,8 @@ private fun ReaderScreen(
                                     onNext = viewModel::nextSearchMatch
                                 )
                             }
-                            if (!inReadMode || chromeVisible) {
-                                Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 10.dp)) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Text(stringResource(R.string.book_progress), style = MaterialTheme.typography.labelLarge)
-                                        Text(stringResource(R.string.book_percentage, percentage), style = MaterialTheme.typography.labelLarge)
-                                    }
-                                    Slider(
-                                        value = seekFraction,
-                                        onValueChange = {
-                                            isSeeking = true
-                                            manualScrollPosition = null
-                                            seekFraction = it
-                                        },
-                                        onValueChangeFinished = {
-                                            val targetOffset = (
-                                                seekFraction * currentDocument.totalCharacterCount.toFloat()
-                                            ).roundToLong()
-                                            isSeeking = false
-                                            if (settings.followSpokenText) followEnabled = true
-                                            if (inReadMode) {
-                                                viewModel.seekVisualToAbsoluteOffset(targetOffset)
-                                            } else {
-                                                viewModel.seekToAbsoluteOffset(targetOffset)
-                                            }
-                                        },
-                                        enabled = currentDocument.totalCharacterCount > 0L,
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
-                                }
+                            if ((!inReadMode || chromeVisible) && !compactLearning) {
+                                progressControls()
                             }
                             if (!inReadMode) {
                                 playbackError?.let { error ->
@@ -1205,7 +1247,20 @@ private fun ReaderScreen(
                                     )
                                 }
                             }
-                            if (isEpubReadMode) {
+                            if (learningActive) {
+                                LanguageLearningPane(
+                                    state = learningPassage,
+                                    position = learningCursor,
+                                    spokenRange = learningSpokenRange(documentId, narration),
+                                    fontSizeSp = settings.readerFontSizeSp,
+                                    lineHeight = settings.lineHeight,
+                                    followRevision = learningFollowRevision,
+                                    onClose = { learningEnabled = false },
+                                    onRetry = learningViewModel::retry,
+                                    modifier = Modifier.weight(1f),
+                                    progressControls = progressControls.takeIf { compactLearning }
+                                )
+                            } else if (isEpubReadMode) {
                                 val readingState = epubReading
                                 if (readingState != null) {
                                     EpubReaderPane(
@@ -1302,7 +1357,7 @@ private fun ReaderScreen(
                                 }
                              }
                         }
-                        if (!followEnabled && currentParagraphIndex >= 0 && !inReadMode) {
+                        if (!followEnabled && currentParagraphIndex >= 0 && !inReadMode && !learningActive) {
                             AssistChip(
                                 onClick = {
                                     followEnabled = true
@@ -1866,8 +1921,63 @@ private fun highlightedText(
     }
 }
 
+/** Landscape learning keeps attribution and transport on one row, freeing space for text. */
 @Composable
-private fun ReaderControls(
+internal fun ReaderFooter(translated: Boolean, compact: Boolean, controls: @Composable () -> Unit) {
+    if (compact) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            if (translated) TranslationAttribution(Modifier.weight(1f).padding(horizontal = 22.dp))
+            Box(Modifier.weight(1f)) { controls() }
+        }
+    } else {
+        Column {
+            if (translated) TranslationAttribution(Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 6.dp))
+            controls()
+        }
+    }
+}
+
+@Composable
+internal fun ReaderProgress(
+    percentage: Int,
+    compact: Boolean,
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    onValueChangeFinished: () -> Unit,
+    enabled: Boolean
+) {
+    val description = stringResource(R.string.book_progress)
+    val slider: @Composable (Modifier) -> Unit = { modifier ->
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            onValueChangeFinished = onValueChangeFinished,
+            enabled = enabled,
+            modifier = modifier.semantics { contentDescription = description }
+        )
+    }
+    if (compact) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 22.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Text(stringResource(R.string.book_percentage, percentage), style = MaterialTheme.typography.labelLarge)
+            slider(Modifier.weight(1f))
+        }
+    } else {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 10.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(description, style = MaterialTheme.typography.labelLarge)
+                Text(stringResource(R.string.book_percentage, percentage), style = MaterialTheme.typography.labelLarge)
+            }
+            slider(Modifier.fillMaxWidth())
+        }
+    }
+}
+
+@Composable
+internal fun ReaderControls(
     narration: NarrationState,
     playing: Boolean,
     transport: ReaderTransport,
@@ -1877,6 +1987,7 @@ private fun ReaderControls(
     visualReadingUnit: VisualReadingUnit,
     visualReadingCompleted: Boolean,
     onToggleVisualUnit: () -> Unit,
+    onNavigate: () -> Unit = {},
     onPlay: () -> Unit
 ) {
     val speedLabel = narrationSpeedLabel(if (reading) visualReadingPace else speechRate)
@@ -1912,7 +2023,7 @@ private fun ReaderControls(
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = transport::previous) {
+            IconButton(onClick = { onNavigate(); transport.previous() }) {
                 Icon(
                     Icons.Outlined.SkipPrevious,
                     contentDescription = stringResource(
@@ -1924,7 +2035,7 @@ private fun ReaderControls(
                     )
                 )
             }
-            IconButton(onClick = onPlay, modifier = Modifier.size(56.dp)) {
+            IconButton(onClick = { onNavigate(); onPlay() }, modifier = Modifier.size(56.dp)) {
                 Icon(
                     imageVector = when {
                         completed -> Icons.Outlined.Replay
@@ -1940,7 +2051,7 @@ private fun ReaderControls(
                     tint = MaterialTheme.colorScheme.primary
                 )
             }
-            IconButton(onClick = transport::next) {
+            IconButton(onClick = { onNavigate(); transport.next() }) {
                 Icon(
                     Icons.Outlined.SkipNext,
                     contentDescription = stringResource(
@@ -2312,6 +2423,10 @@ private fun LibraryMoreMenu(onOpenSettings: () -> Unit, onOpenExports: () -> Uni
 private fun ExportAndSettingsMenu(
     exportState: ExportState,
     translation: TranslationUiState,
+    showLearning: Boolean,
+    learningActive: Boolean,
+    learningSource: LearningSource,
+    onToggleLearning: () -> Unit,
     onTranslate: () -> Unit,
     onExport: () -> Unit,
     onCancelExport: () -> Unit,
@@ -2328,6 +2443,33 @@ private fun ExportAndSettingsMenu(
             Icon(Icons.Outlined.MoreVert, contentDescription = stringResource(R.string.more_actions))
         }
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            if (showLearning) {
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(stringResource(R.string.learning_title))
+                            Text(
+                                stringResource(when (learningSource) {
+                                    is LearningSource.Available -> R.string.learning_menu_hint
+                                    LearningSource.Missing -> R.string.learning_original_missing
+                                    LearningSource.Failed -> R.string.learning_original_unavailable
+                                    else -> R.string.learning_checking_original
+                                }),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    },
+                    leadingIcon = { Icon(Icons.Outlined.ViewAgenda, contentDescription = null) },
+                    trailingIcon = { if (learningActive) Icon(Icons.Outlined.Check, contentDescription = null) },
+                    modifier = Modifier.semantics { selected = learningActive },
+                    enabled = learningActive || learningSource is LearningSource.Available,
+                    onClick = {
+                        menuOpen = false
+                        onToggleLearning()
+                    }
+                )
+                HorizontalDivider()
+            }
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.make_note)) },
                 onClick = {
